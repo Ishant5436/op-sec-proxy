@@ -1,0 +1,183 @@
+use alloy::consensus::{TxEnvelope, Transaction, transaction::SignerRecoverable};
+use revm::{Context, MainContext, MainBuilder, ExecuteEvm};
+use revm::context::TxEnv;
+use revm::primitives::TxKind;
+use revm::database::WrapDatabaseRef;
+use crate::fork_db::RpcDb;
+
+pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, String> {
+    // 1. Recover the sender address
+    let caller = tx_env.recover_signer().map_err(|e| format!("Failed to recover signer: {:?}", e))?;
+    
+    // 2. Setup the EVM context and database
+    let db_wrapper = WrapDatabaseRef(db);
+    let ctx = Context::mainnet().with_db(db_wrapper);
+    let mut evm = ctx.build_mainnet();
+    
+    // 3. Extract transaction details
+    let gas_limit = tx_env.gas_limit();
+    let value = tx_env.value();
+    let to_addr = tx_env.to();
+    
+    let kind = match to_addr {
+        Some(addr) => TxKind::Call(addr),
+        None => TxKind::Create,
+    };
+    
+    let data = tx_env.input().clone();
+    
+    // 4. Construct the revm TxEnv
+    let revm_tx = TxEnv::builder()
+        .caller(caller)
+        .kind(kind)
+        .value(value)
+        .data(data)
+        .gas_limit(gas_limit)
+        .build()
+        .map_err(|e| format!("Failed to build revm TxEnv: {:?}", e))?;
+        
+    // 5. Execute the simulation
+    let sim_result = evm.transact(revm_tx)
+        .map_err(|e| format!("Simulation execution error: {:?}", e))?;
+        
+    // 6. Security Analysis
+    let gas_used = sim_result.result.gas().tx_gas_used();
+
+    if sim_result.result.is_success() {
+        // Rule 2: Max Gas Overhead Heuristic
+        if gas_used > 0 && gas_used >= gas_limit {
+            return Err(format!("Transaction consumes entire gas limit ({}). Potential DoS or infinite loop.", gas_used));
+        }
+        Ok(true)
+    } else if sim_result.result.is_halt() {
+        Err("Transaction halted".to_string())
+    } else {
+        // Rule 3: Revert Detection
+        Err("Transaction reverted during simulation".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::primitives::{Address, B256, Bytes, U256};
+    use std::str::FromStr;
+    use tokio::net::TcpListener;
+    use hyper::server::conn::http1;
+    use hyper::service::service_fn;
+    use hyper::{Request, Response, body::Incoming};
+    use http_body_util::Full;
+    use hyper::body::Bytes as HyperBytes;
+    use serde_json::json;
+    use alloy::consensus::TxLegacy;
+    use alloy::signers::local::PrivateKeySigner;
+    use std::convert::Infallible;
+
+    use alloy::network::TxSignerSync;
+
+    async fn handle_mock_rpc(req: Request<Incoming>) -> Result<Response<Full<HyperBytes>>, Infallible> {
+        use http_body_util::BodyExt;
+        
+        let body_bytes = req.into_body().collect().await.unwrap().to_bytes();
+        let payload: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        
+        let method = payload["method"].as_str().unwrap_or("");
+        
+        let result = match method {
+            "eth_getBalance" => json!("0x0"), // 0 ETH
+            "eth_getTransactionCount" => json!("0x0"),
+            "eth_getCode" => json!("0x"), // Empty code (EOA)
+            _ => json!(null)
+        };
+        
+        let resp = json!({
+            "jsonrpc": "2.0",
+            "id": payload["id"],
+            "result": result
+        });
+        
+        Ok(Response::new(Full::new(HyperBytes::from(resp.to_string()))))
+    }
+
+    async fn spawn_mock_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        
+        tokio::spawn(async move {
+            loop {
+                if let Ok((stream, _)) = listener.accept().await {
+                    let io = hyper_util::rt::TokioIo::new(stream);
+                    tokio::spawn(async move {
+                        let _ = http1::Builder::new().serve_connection(io, service_fn(handle_mock_rpc)).await;
+                    });
+                }
+            }
+        });
+        
+        format!("http://127.0.0.1:{}", port)
+    }
+
+    fn create_dummy_tx(gas_limit: u64, value: u128) -> TxEnvelope {
+        let signer = PrivateKeySigner::random();
+        let mut tx = TxLegacy {
+            chain_id: Some(10),
+            nonce: 0,
+            gas_price: 1_000_000_000,
+            gas_limit,
+            to: alloy::primitives::TxKind::Call(Address::from_str("0x0000000000000000000000000000000000000000").unwrap()),
+            value: U256::from(value),
+            input: Bytes::default(),
+        };
+        let signature = signer.sign_transaction_sync(&mut tx).unwrap();
+        TxEnvelope::Legacy(alloy::consensus::Signed::new_unchecked(tx, signature, B256::ZERO))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_simulate_tx_success() {
+        let url = spawn_mock_server().await;
+        
+        let tx = create_dummy_tx(50000, 0); // High gas limit, avoids heuristic
+        
+        let res = tokio::task::spawn_blocking(move || {
+            let db = RpcDb::new(url);
+            simulate_tx(&tx, db)
+        }).await.unwrap();
+        
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), true);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_simulate_tx_gas_heuristic() {
+        let url = spawn_mock_server().await;
+        
+        let tx = create_dummy_tx(21000, 0); // Transfer takes exactly 21000 gas
+        
+        let res = tokio::task::spawn_blocking(move || {
+            let db = RpcDb::new(url);
+            simulate_tx(&tx, db)
+        }).await.unwrap();
+        
+        // Because gas_used == gas_limit (21000 == 21000), it triggers the heuristic block
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("consumes entire gas limit"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_simulate_tx_revert_due_to_insufficient_funds() {
+        let url = spawn_mock_server().await;
+        
+        // Value larger than mock balance (1 ETH = 10^18 wei, so let's send 2 ETH)
+        let tx = create_dummy_tx(50000, 2_000_000_000_000_000_000); 
+        
+        let res = tokio::task::spawn_blocking(move || {
+            let db = RpcDb::new(url);
+            simulate_tx(&tx, db)
+        }).await.unwrap();
+        
+        // Revm errors out before execution if sender lacks balance for value + gas
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert!(err.contains("Simulation execution error"));
+    }
+}

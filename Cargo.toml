@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+alloy = { version = "2.3.0", features = ["rlp", "consensus", "rpc-types", "network", "providers", "k256"] }
 dotenvy = "0.15.7"
 http-body-util = "0.1.4"
 hyper = { version = "1.11.0", features = ["full"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
-reqwest = { version = "0.13.4", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["blocking", "json"] }
+revm = "42.0.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["full"] }

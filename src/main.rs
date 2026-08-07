@@ -2,6 +2,9 @@ mod config;
 mod server;
 mod rpc_client;
 mod interceptor;
+mod decoder;
+mod fork_db;
+mod simulator;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

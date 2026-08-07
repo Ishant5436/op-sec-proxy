@@ -1,6 +1,10 @@
 use serde_json::{json, Value};
 use op_sec_proxy::interceptor::check_payload;
 
+// Dummy upstream URL used for tests that don't need real network access.
+// The simulation will fail during decode (invalid tx hex) before any RPC call is made.
+const TEST_UPSTREAM: &str = "http://192.0.2.1:1";
+
 // ═══════════════════════════════════════════════════════════════════
 //  INTERCEPTOR UNIT TESTS — Exhaustive edge-case coverage
 // ═══════════════════════════════════════════════════════════════════
@@ -13,14 +17,17 @@ fn interceptor_blocks_eth_send_raw_transaction() {
         "params": ["0xdeadbeef"],
         "id": 1
     });
-    let result = check_payload(&payload);
+    let result = check_payload(&payload, TEST_UPSTREAM);
     assert!(result.is_err(), "eth_sendRawTransaction must be blocked");
 
     let err = result.unwrap_err();
     assert_eq!(err["error"]["code"], -32000);
-    assert_eq!(
-        err["error"]["message"],
-        "AESI: Transaction Blocked by Security Heuristics"
+    // M2: error message now includes the specific failure reason from simulation
+    let msg = err["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.starts_with("AESI: Transaction Blocked by Security Heuristics"),
+        "Error message should start with AESI prefix, got: {}",
+        msg
     );
     assert_eq!(err["id"], 1, "Error response must preserve the original id");
     assert_eq!(err["jsonrpc"], "2.0");
@@ -34,7 +41,7 @@ fn interceptor_preserves_string_id() {
         "params": ["0xabc"],
         "id": "my-custom-id"
     });
-    let err = check_payload(&payload).unwrap_err();
+    let err = check_payload(&payload, TEST_UPSTREAM).unwrap_err();
     assert_eq!(err["id"], "my-custom-id");
 }
 
@@ -46,7 +53,7 @@ fn interceptor_handles_null_id() {
         "params": ["0xabc"],
         "id": null
     });
-    let err = check_payload(&payload).unwrap_err();
+    let err = check_payload(&payload, TEST_UPSTREAM).unwrap_err();
     assert!(err["id"].is_null());
 }
 
@@ -57,8 +64,20 @@ fn interceptor_handles_missing_id() {
         "method": "eth_sendRawTransaction",
         "params": ["0xabc"]
     });
-    let err = check_payload(&payload).unwrap_err();
+    let err = check_payload(&payload, TEST_UPSTREAM).unwrap_err();
     assert!(err["id"].is_null(), "Missing id should default to null");
+}
+
+#[test]
+fn interceptor_blocks_empty_params() {
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_sendRawTransaction",
+        "params": [],
+        "id": 1
+    });
+    let result = check_payload(&payload, TEST_UPSTREAM);
+    assert!(result.is_err(), "Empty params should be blocked at decode stage");
 }
 
 #[test]
@@ -69,7 +88,7 @@ fn interceptor_allows_eth_block_number() {
         "params": [],
         "id": 1
     });
-    assert!(check_payload(&payload).is_ok());
+    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok());
 }
 
 #[test]
@@ -80,7 +99,7 @@ fn interceptor_allows_eth_chain_id() {
         "params": [],
         "id": 2
     });
-    assert!(check_payload(&payload).is_ok());
+    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok());
 }
 
 #[test]
@@ -91,7 +110,7 @@ fn interceptor_allows_eth_get_balance() {
         "params": ["0x1234", "latest"],
         "id": 3
     });
-    assert!(check_payload(&payload).is_ok());
+    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok());
 }
 
 #[test]
@@ -102,7 +121,7 @@ fn interceptor_allows_eth_call() {
         "params": [{"to": "0xabc"}, "latest"],
         "id": 4
     });
-    assert!(check_payload(&payload).is_ok());
+    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok());
 }
 
 #[test]
@@ -113,7 +132,7 @@ fn interceptor_allows_eth_estimate_gas() {
         "params": [{"to": "0xabc"}],
         "id": 5
     });
-    assert!(check_payload(&payload).is_ok());
+    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok());
 }
 
 #[test]
@@ -123,7 +142,7 @@ fn interceptor_handles_missing_method_field() {
         "params": [],
         "id": 1
     });
-    assert!(check_payload(&payload).is_ok(), "Missing method should pass through");
+    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok(), "Missing method should pass through");
 }
 
 #[test]
@@ -134,13 +153,13 @@ fn interceptor_handles_non_string_method() {
         "params": [],
         "id": 1
     });
-    assert!(check_payload(&payload).is_ok(), "Non-string method should pass through");
+    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok(), "Non-string method should pass through");
 }
 
 #[test]
 fn interceptor_handles_empty_object() {
     let payload = json!({});
-    assert!(check_payload(&payload).is_ok());
+    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok());
 }
 
 #[test]
@@ -153,7 +172,7 @@ fn interceptor_is_case_sensitive() {
         "id": 1
     });
     assert!(
-        check_payload(&payload).is_ok(),
+        check_payload(&payload, TEST_UPSTREAM).is_ok(),
         "Case-different method must NOT be blocked (JSON-RPC is case-sensitive)"
     );
 }
@@ -175,7 +194,7 @@ fn interceptor_rejects_only_exact_method_name() {
             "id": 1
         });
         assert!(
-            check_payload(&payload).is_ok(),
+            check_payload(&payload, TEST_UPSTREAM).is_ok(),
             "Method '{}' should NOT be blocked",
             method
         );
@@ -235,9 +254,11 @@ async fn server_intercepts_send_raw_transaction() {
 
     let body: Value = resp.json().await.expect("Response should be valid JSON");
     assert_eq!(body["error"]["code"], -32000);
-    assert_eq!(
-        body["error"]["message"],
-        "AESI: Transaction Blocked by Security Heuristics"
+    let msg = body["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.starts_with("AESI: Transaction Blocked by Security Heuristics"),
+        "Error message should start with AESI prefix, got: {}",
+        msg
     );
     assert_eq!(body["id"], 42);
 }

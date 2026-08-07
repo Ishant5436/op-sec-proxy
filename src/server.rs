@@ -9,9 +9,12 @@ use serde_json::Value;
 
 use crate::rpc_client::RpcForwarder;
 
+const INTERNAL_ERROR_JSON: &str = r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal server error"}}"#;
+
 #[derive(Clone)]
 struct AppState {
     forwarder: RpcForwarder,
+    upstream_url: String,
 }
 
 pub async fn run_server(port: u16, upstream_url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -20,7 +23,8 @@ pub async fn run_server(port: u16, upstream_url: String) -> Result<(), Box<dyn s
     println!("AESI Proxy listening on http://{}", addr);
 
     let state = AppState {
-        forwarder: RpcForwarder::new(upstream_url),
+        forwarder: RpcForwarder::new(upstream_url.clone()),
+        upstream_url,
     };
 
     loop {
@@ -62,20 +66,42 @@ async fn handle_request(
             }
         };
 
-        // Run AESI Security Heuristics
-        if let Err(err_resp) = crate::interceptor::check_payload(&payload) {
-            let resp_str = serde_json::to_string(&err_resp).unwrap_or_default();
-            return Ok(Response::new(Full::new(Bytes::from(resp_str))));
+        // Run AESI Security Heuristics inside a blocking thread
+        // to protect the async Tokio runtime from synchronous RPC I/O in fork_db.
+        let upstream = state.upstream_url.clone();
+        let payload_for_sim = payload.clone();
+        let check_result = tokio::task::spawn_blocking(move || {
+            crate::interceptor::check_payload(&payload_for_sim, &upstream)
+        }).await;
+
+        match check_result {
+            Ok(Err(err_resp)) => {
+                // Transaction blocked by heuristics
+                let resp_str = serde_json::to_string(&err_resp).unwrap_or_else(|_|
+                    INTERNAL_ERROR_JSON.to_string()
+                );
+                return Ok(Response::new(Full::new(Bytes::from(resp_str))));
+            }
+            Err(join_err) => {
+                // spawn_blocking task panicked or was cancelled
+                eprintln!("Simulation task failed: {}", join_err);
+                let mut err_resp = Response::new(Full::new(Bytes::from(INTERNAL_ERROR_JSON)));
+                *err_resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                return Ok(err_resp);
+            }
+            Ok(Ok(())) => { /* Passed heuristics, continue to forward */ }
         }
 
         match state.forwarder.forward(payload).await {
             Ok(resp_val) => {
-                let resp_str = serde_json::to_string(&resp_val).unwrap_or_default();
+                let resp_str = serde_json::to_string(&resp_val).unwrap_or_else(|_|
+                    INTERNAL_ERROR_JSON.to_string()
+                );
                 Ok(Response::new(Full::new(Bytes::from(resp_str))))
             }
             Err(e) => {
                 eprintln!("Forwarding error: {}", e);
-                let mut err_resp = Response::new(Full::new(Bytes::from("Internal Server Error")));
+                let mut err_resp = Response::new(Full::new(Bytes::from(INTERNAL_ERROR_JSON)));
                 *err_resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                 Ok(err_resp)
             }
