@@ -1,50 +1,27 @@
-# Optimism RetroPGF Grant Proposal: OP Security Proxy
+Project Name: OP Security Proxy
+Repository: https://github.com/Ishant5436/op-sec-proxy
+Categories: Developer Tooling & Infrastructure, Security & User Protection
 
-## 1. Basic Information
-- **Project Name:** OP Security Proxy
-- **GitHub Repository:** [Ishant5436/op-sec-proxy](https://github.com/Ishant5436/op-sec-proxy)
-- **Primary Category:** Developer Tooling & Infrastructure
-- **Secondary Category:** Security & User Protection
+Description:
+I wrote OP Security Proxy in Rust to act as a fast JSON-RPC middleware layer. It basically sits right between a standard wallet or client and the public Optimism RPC nodes.
 
-## 2. Project Overview
-**OP Security Proxy** is a high-performance, zero-trust JSON-RPC middleware built in Rust. It sits between an Ethereum-compatible wallet/client and the Optimism Sequencer (or public RPC nodes). 
+Whenever a transaction goes out via eth_sendRawTransaction, the proxy catches it. It uses the revm engine to fork the network state locally and run a quick simulation. If that transaction is going to revert, halt, or do something weird like burn the whole gas limit without touching the state, the proxy just drops it before it ever hits the public mempool.
 
-The proxy intercepts outbound transactions (`eth_sendRawTransaction`) and utilizes the `revm` (Rust Ethereum Virtual Machine) engine to locally fork the network state and simulate the transaction *before* it is broadcasted. Transactions that revert, halt, or violate predefined security heuristics (like consuming 100% of the gas limit without state changes) are preemptively dropped.
+The Problem it Solves:
+When you use Ethereum-equivalent chains, you still have to pay the L2 execution fee up to the point of failure if a transaction reverts on-chain. We see this all the time with MEV bots, slippage issues, or unexpected state changes. This proxy is a public good that prevents regular users from paying for failed executions, which saves them money and keeps junk traffic off the sequencer.
 
-## 3. The Problem & Optimism Alignment
-Ethereum-equivalent networks structure transaction fees into an L1 data availability fee and an L2 execution fee. When a transaction reverts on-chain (e.g., due to MEV extraction, sandwiching, slippage, or localized state changes), the user forfeits the L2 execution fee up to the revert execution point.
+Performance Data:
+I ran some tests against the mainnet.optimism.io endpoint to see the impact. For standard read requests like eth_call, there is basically no overhead. Actually, because I am using tokio and hyper for connection pooling, the jitter was slightly better than hitting the upstream directly (Upstream: ~516ms, Proxy: ~444ms).
 
-This represents a significant leakage of capital from the ecosystem and degrades the user experience. By deploying **OP Security Proxy**, we provide a public good infrastructure that protects end-users from funding failed on-chain executions.
+When doing the actual transaction simulation, it takes about 2.9 seconds. That overhead comes from having to fetch nonces, balances, and raw bytecodes over the network on the fly so we can reconstruct the state from scratch.
 
-## 4. Quantitative Impact & Performance
-The proxy has been rigorously benchmarked against the public `mainnet.optimism.io` endpoint.
+Architecture:
+- The stack is mostly Rust, relying on tokio for the async side of things and hyper to handle the HTTP server.
+- I pull in alloy to handle the Ethereum primitives and RPC parsing.
+- I use revm to run the local EVM simulations.
+- Wrote a bunch of strict TDD tests to make sure it doesn't panic if an upstream node times out.
 
-### 4.1. Routing Overhead (Non-Mutating Operations)
-For standard read-only RPC traffic (e.g., `eth_blockNumber`, `eth_call`), the proxy acts as a pass-through layer.
-- **Upstream Direct Latency:** 516.13 ms (StdDev: 139.79 ms)
-- **Via OP Security Proxy:** 444.37 ms (StdDev: 50.73 ms)
-- **Measured Overhead:** **-71.76 ms**
-
-*Note: The proxy introduces statistically negligible overhead. The observed latency reduction and tighter standard deviation are attributed to internal connection pooling (`hyper` and `tokio`), which amortizes TCP/TLS handshake latency and stabilizes network jitter across concurrent requests.*
-
-### 4.2. Zero-Trust Simulation Latency
-- **Transaction Interception & Simulation Time:** ~2.9 seconds
-
-This overhead represents the full cost of on-demand, zero-trust state reconstruction over network RPC (fetching upstream account balances, nonces, and bytecodes in real-time). This deterministically prevents malicious or reverting transactions from reaching the mempool.
-
-## 5. Economic Value Created (Capital Retention)
-- **Average cost of reverted TX on OP Mainnet:** ~0.0001 ETH
-- **Gas Saved:** 100% of the L2 execution cost per blocked transaction.
-
-By open-sourcing this middleware, wallets, dApps, and enterprise node operators can integrate it to programmatically filter junk traffic, reduce sequencer congestion, and retain millions of dollars in capital within the Optimism economy over time.
-
-## 6. Engineering & Architecture
-The project is engineered for memory safety, concurrency, and high throughput:
-- **Rust Foundation:** Built utilizing `tokio` (async runtime), `hyper` (HTTP server), and `alloy` (Ethereum primitives).
-- **REVM Integration:** Uses the paradigm-shifting `revm` crate for 1:1 EVM execution compatibility.
-- **Security-First:** Evaluated via rigorous Test-Driven Development (TDD) pipelines and comprehensive QA audits, ensuring zero panics on network timeouts.
-
-## 7. Roadmap & Future Work
-- **Local State Caching:** Implement LRU caching for state trie nodes to drive the 2.9s simulation latency down to sub-100ms.
-- **Advanced MEV Protection:** Integrate heuristics to detect and front-run sandwich attacks locally.
-- **Multi-Chain Support:** Extend native support for Base, Arbitrum, and other Superchain ecosystems.
+Future Work:
+1. I want to add LRU caching for the state trie nodes to get that simulation time under 100ms.
+2. Add local heuristics to catch sandwich attacks.
+3. Get it working smoothly with Base and other Superchain networks.
