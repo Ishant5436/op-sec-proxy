@@ -9,6 +9,8 @@ use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use std::str::FromStr;
 use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 /// Custom error type for RPC database operations.
 /// Replaces `Infallible` to allow graceful error propagation
@@ -30,6 +32,8 @@ impl DBErrorMarker for RpcDbError {}
 pub struct RpcDb {
     client: Client,
     rpc_url: String,
+    account_cache: Arc<Mutex<HashMap<Address, AccountInfo>>>,
+    storage_cache: Arc<Mutex<HashMap<(Address, U256), U256>>>,
 }
 
 impl RpcDb {
@@ -41,6 +45,8 @@ impl RpcDb {
                 .build()
                 .expect("Failed to build blocking HTTP client"),
             rpc_url,
+            account_cache: Arc::new(Mutex::new(HashMap::new())),
+            storage_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     
@@ -73,6 +79,13 @@ impl DatabaseRef for RpcDb {
     type Error = RpcDbError;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        // 1. Check in-memory state cache
+        if let Ok(guard) = self.account_cache.lock() {
+            if let Some(cached) = guard.get(&address) {
+                return Ok(Some(cached.clone()));
+            }
+        }
+
         let addr_str = address.to_string();
         
         // Fetch balance
@@ -96,13 +109,20 @@ impl DatabaseRef for RpcDb {
             .map_err(|e| RpcDbError(format!("Failed to decode bytecode hex: {}", e)))?;
         let bytecode = Bytecode::new_raw(alloy::primitives::Bytes::from(code_bytes));
         
-        Ok(Some(AccountInfo {
+        let account_info = AccountInfo {
             balance,
             nonce,
             code_hash: bytecode.hash_slow(),
             code: Some(bytecode),
             ..Default::default()
-        }))
+        };
+
+        // Cache the fetched account state
+        if let Ok(mut guard) = self.account_cache.lock() {
+            guard.insert(address, account_info.clone());
+        }
+
+        Ok(Some(account_info))
     }
 
     fn code_by_hash_ref(&self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
@@ -112,6 +132,13 @@ impl DatabaseRef for RpcDb {
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        // 1. Check in-memory storage cache
+        if let Ok(guard) = self.storage_cache.lock() {
+            if let Some(&cached_val) = guard.get(&(address, index)) {
+                return Ok(cached_val);
+            }
+        }
+
         let addr_str = address.to_string();
         let idx_str = format!("0x{:x}", index);
         
@@ -119,6 +146,12 @@ impl DatabaseRef for RpcDb {
         let val_str = res.as_str().unwrap_or("0x0");
         let val = U256::from_str(val_str)
             .map_err(|e| RpcDbError(format!("Failed to parse storage value '{}': {}", val_str, e)))?;
+
+        // Cache the fetched storage slot
+        if let Ok(mut guard) = self.storage_cache.lock() {
+            guard.insert((address, index), val);
+        }
+
         Ok(val)
     }
 

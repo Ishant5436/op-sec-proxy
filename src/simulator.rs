@@ -52,7 +52,19 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, String> {
     } else if sim_result.result.is_halt() {
         Err("Transaction halted".to_string())
     } else {
-        // Rule 3: Revert Detection
+        // Rule 3: Decoded Revert Detection (Milestone 1 Deliverable)
+        if let Some(output) = sim_result.result.output() {
+            let hex_output = alloy::hex::encode(output);
+            if output.len() >= 68 && output[0..4] == [0x08, 0xc3, 0x79, 0xa0] {
+                if let Ok(reason) = std::str::from_utf8(&output[68..]) {
+                    let clean = reason.trim_matches(char::from(0)).trim();
+                    if !clean.is_empty() {
+                        return Err(format!("Transaction reverted: {} (0x{})", clean, hex_output));
+                    }
+                }
+            }
+            return Err(format!("Transaction reverted during simulation (0x{})", hex_output));
+        }
         Err("Transaction reverted during simulation".to_string())
     }
 }
