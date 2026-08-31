@@ -1,0 +1,21 @@
+{
+  "name": "@op-sec/client",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for OP Security Proxy: Preemptive transaction simulation & gas-protection for Superchain wallets",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test tests/*.test.js || ts-node tests/provider.test.ts || node tests/test_runner.js"
+  },
+  "keywords": [
+    "optimism",
+    "superchain",
+    "rpc-proxy",
+    "gas-protection",
+    "revm",
+    "ethereum"
+  ],
+  "author": "Ishant Panchal <ishant.p@somaiya.edu>",
+  "license": "MIT"
+}
