@@ -1,5 +1,12 @@
 # OP Security Proxy
 
+[![Rust Tests](https://img.shields.io/badge/Rust%20Tests-26%2F26%20passing-brightgreen)](tests/)
+[![TypeScript SDK](https://img.shields.io/badge/TS%20SDK-4%2F4%20passing-blue)](sdk/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
+[![Superchain](https://img.shields.io/badge/Superchain-OP%20Stack-red)](https://optimism.io)
+
+![OP Security Proxy Demo](assets/op_sec_proxy_demo.gif)
+
 **OP Security Proxy** is a high-performance, zero-trust JSON-RPC middleware built in Rust. It sits between an Ethereum-compatible wallet/client and the Optimism Sequencer (or public RPC nodes).
 
 The proxy intercepts outbound transactions (`eth_sendRawTransaction`) and utilizes the `revm` (Rust Ethereum Virtual Machine) engine to locally fork the network state and simulate the transaction *before* it is broadcasted. Transactions that revert, halt, or violate predefined security heuristics (like consuming 100% of the gas limit without state changes) are preemptively dropped.
