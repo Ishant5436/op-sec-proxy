@@ -4,9 +4,10 @@ use alloy::rlp::Decodable;
 use serde_json::Value;
 
 pub fn decode_tx(payload: &Value) -> Result<TxEnvelope, String> {
-    // 1. Ensure method is eth_sendRawTransaction
-    if payload.get("method").and_then(|v| v.as_str()) != Some("eth_sendRawTransaction") {
-        return Err("Not an eth_sendRawTransaction".into());
+    // 1. Ensure method is a send-transaction variant
+    let method = payload.get("method").and_then(|v| v.as_str()).unwrap_or("");
+    if method != "eth_sendRawTransaction" && method != "eth_sendTransaction" {
+        return Err("Not a transaction send method".into());
     }
 
     // 2. Extract params array
@@ -61,6 +62,6 @@ mod tests {
         
         let res = decode_tx(&payload);
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), "Not an eth_sendRawTransaction");
+        assert_eq!(res.unwrap_err(), "Not a transaction send method");
     }
 }

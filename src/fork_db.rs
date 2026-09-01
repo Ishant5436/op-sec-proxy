@@ -28,6 +28,9 @@ impl std::error::Error for RpcDbError {}
 
 impl DBErrorMarker for RpcDbError {}
 
+pub const MAX_ACCOUNT_CACHE_CAPACITY: usize = 4096;
+pub const MAX_STORAGE_CACHE_CAPACITY: usize = 16384;
+
 #[derive(Clone)]
 pub struct RpcDb {
     client: Client,
@@ -79,8 +82,9 @@ impl DatabaseRef for RpcDb {
     type Error = RpcDbError;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        // 1. Check in-memory state cache
-        if let Ok(guard) = self.account_cache.lock() {
+        // 1. Check in-memory state cache with mutex poison recovery
+        {
+            let guard = self.account_cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = guard.get(&address) {
                 return Ok(Some(cached.clone()));
             }
@@ -117,8 +121,14 @@ impl DatabaseRef for RpcDb {
             ..Default::default()
         };
 
-        // Cache the fetched account state
-        if let Ok(mut guard) = self.account_cache.lock() {
+        // Cache the fetched account state with capacity bound
+        {
+            let mut guard = self.account_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.len() >= MAX_ACCOUNT_CACHE_CAPACITY {
+                if let Some(first_key) = guard.keys().next().cloned() {
+                    guard.remove(&first_key);
+                }
+            }
             guard.insert(address, account_info.clone());
         }
 
@@ -132,8 +142,9 @@ impl DatabaseRef for RpcDb {
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        // 1. Check in-memory storage cache
-        if let Ok(guard) = self.storage_cache.lock() {
+        // 1. Check in-memory storage cache with mutex poison recovery
+        {
+            let guard = self.storage_cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(&cached_val) = guard.get(&(address, index)) {
                 return Ok(cached_val);
             }
@@ -147,8 +158,14 @@ impl DatabaseRef for RpcDb {
         let val = U256::from_str(val_str)
             .map_err(|e| RpcDbError(format!("Failed to parse storage value '{}': {}", val_str, e)))?;
 
-        // Cache the fetched storage slot
-        if let Ok(mut guard) = self.storage_cache.lock() {
+        // Cache the fetched storage slot with capacity bound
+        {
+            let mut guard = self.storage_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.len() >= MAX_STORAGE_CACHE_CAPACITY {
+                if let Some(first_key) = guard.keys().next().cloned() {
+                    guard.remove(&first_key);
+                }
+            }
             guard.insert((address, index), val);
         }
 

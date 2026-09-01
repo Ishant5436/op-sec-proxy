@@ -10,10 +10,13 @@ RUN cargo build --release
 # Distroless / minimal runtime stage
 FROM debian:bullseye-slim
 
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 1000 appuser
 
 WORKDIR /app
 COPY --from=builder /usr/src/op-sec-proxy/target/release/op-sec-proxy /usr/local/bin/op-sec-proxy
+
+USER appuser
 
 ENV OP_RPC_URL="https://mainnet.optimism.io"
 ENV PROXY_PORT=3000

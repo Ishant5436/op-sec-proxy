@@ -43,30 +43,51 @@ pub async fn run_server(port: u16, upstream_url: String) -> Result<(), Box<dyn s
     }
 }
 
+fn build_json_response(body_str: String, status: StatusCode) -> Response<Full<Bytes>> {
+    let mut resp = Response::new(Full::new(Bytes::from(body_str)));
+    *resp.status_mut() = status;
+    resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+    resp.headers_mut().insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+    resp.headers_mut().insert("Access-Control-Allow-Methods", "POST, OPTIONS".parse().unwrap());
+    resp.headers_mut().insert("Access-Control-Allow-Headers", "Content-Type, Authorization".parse().unwrap());
+    resp
+}
+
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     state: AppState,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    if req.method() == hyper::Method::OPTIONS {
+        let mut preflight = Response::new(Full::new(Bytes::default()));
+        *preflight.status_mut() = StatusCode::NO_CONTENT;
+        preflight.headers_mut().insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+        preflight.headers_mut().insert("Access-Control-Allow-Methods", "POST, OPTIONS".parse().unwrap());
+        preflight.headers_mut().insert("Access-Control-Allow-Headers", "Content-Type, Authorization".parse().unwrap());
+        return Ok(preflight);
+    }
+
     if req.method() == hyper::Method::POST {
         let body_bytes = match req.into_body().collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(_) => {
-                let mut bad_req = Response::new(Full::new(Bytes::from("Bad Request")));
-                *bad_req.status_mut() = StatusCode::BAD_REQUEST;
-                return Ok(bad_req);
+                return Ok(build_json_response(
+                    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#.to_string(),
+                    StatusCode::BAD_REQUEST
+                ));
             }
         };
         
         let payload: Value = match serde_json::from_slice(&body_bytes) {
             Ok(v) => v,
             Err(_) => {
-                let mut bad_req = Response::new(Full::new(Bytes::from("Bad Request")));
-                *bad_req.status_mut() = StatusCode::BAD_REQUEST;
-                return Ok(bad_req);
+                return Ok(build_json_response(
+                    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#.to_string(),
+                    StatusCode::BAD_REQUEST
+                ));
             }
         };
 
-        // Run AESI Security Heuristics inside a blocking thread
+        // Run Security Heuristics inside a blocking thread
         // to protect the async Tokio runtime from synchronous RPC I/O in fork_db.
         let upstream = state.upstream_url.clone();
         let payload_for_sim = payload.clone();
@@ -80,14 +101,12 @@ async fn handle_request(
                 let resp_str = serde_json::to_string(&err_resp).unwrap_or_else(|_|
                     INTERNAL_ERROR_JSON.to_string()
                 );
-                return Ok(Response::new(Full::new(Bytes::from(resp_str))));
+                return Ok(build_json_response(resp_str, StatusCode::OK));
             }
             Err(join_err) => {
                 // spawn_blocking task panicked or was cancelled
                 eprintln!("Simulation task failed: {}", join_err);
-                let mut err_resp = Response::new(Full::new(Bytes::from(INTERNAL_ERROR_JSON)));
-                *err_resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                return Ok(err_resp);
+                return Ok(build_json_response(INTERNAL_ERROR_JSON.to_string(), StatusCode::INTERNAL_SERVER_ERROR));
             }
             Ok(Ok(())) => { /* Passed heuristics, continue to forward */ }
         }
@@ -97,18 +116,14 @@ async fn handle_request(
                 let resp_str = serde_json::to_string(&resp_val).unwrap_or_else(|_|
                     INTERNAL_ERROR_JSON.to_string()
                 );
-                Ok(Response::new(Full::new(Bytes::from(resp_str))))
+                Ok(build_json_response(resp_str, StatusCode::OK))
             }
             Err(e) => {
                 eprintln!("Forwarding error: {}", e);
-                let mut err_resp = Response::new(Full::new(Bytes::from(INTERNAL_ERROR_JSON)));
-                *err_resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                Ok(err_resp)
+                Ok(build_json_response(INTERNAL_ERROR_JSON.to_string(), StatusCode::INTERNAL_SERVER_ERROR))
             }
         }
     } else {
-        let mut not_found = Response::new(Full::new(Bytes::from("Not Found")));
-        *not_found.status_mut() = StatusCode::NOT_FOUND;
-        Ok(not_found)
+        Ok(build_json_response("Not Found".to_string(), StatusCode::NOT_FOUND))
     }
 }
