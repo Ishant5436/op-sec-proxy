@@ -10,7 +10,6 @@ use serde_json::{json, Value};
 use std::str::FromStr;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 
 /// Custom error type for RPC database operations.
 /// Replaces `Infallible` to allow graceful error propagation
@@ -28,6 +27,8 @@ impl std::error::Error for RpcDbError {}
 
 impl DBErrorMarker for RpcDbError {}
 
+use crate::lru::LruCache;
+
 pub const MAX_ACCOUNT_CACHE_CAPACITY: usize = 4096;
 pub const MAX_STORAGE_CACHE_CAPACITY: usize = 16384;
 
@@ -35,8 +36,8 @@ pub const MAX_STORAGE_CACHE_CAPACITY: usize = 16384;
 pub struct RpcDb {
     client: Client,
     rpc_url: String,
-    account_cache: Arc<Mutex<HashMap<Address, AccountInfo>>>,
-    storage_cache: Arc<Mutex<HashMap<(Address, U256), U256>>>,
+    account_cache: Arc<Mutex<LruCache<Address, AccountInfo>>>,
+    storage_cache: Arc<Mutex<LruCache<(Address, U256), U256>>>,
 }
 
 impl RpcDb {
@@ -48,8 +49,8 @@ impl RpcDb {
                 .build()
                 .expect("Failed to build blocking HTTP client"),
             rpc_url,
-            account_cache: Arc::new(Mutex::new(HashMap::new())),
-            storage_cache: Arc::new(Mutex::new(HashMap::new())),
+            account_cache: Arc::new(Mutex::new(LruCache::new(MAX_ACCOUNT_CACHE_CAPACITY))),
+            storage_cache: Arc::new(Mutex::new(LruCache::new(MAX_STORAGE_CACHE_CAPACITY))),
         }
     }
     
@@ -82,11 +83,11 @@ impl DatabaseRef for RpcDb {
     type Error = RpcDbError;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        // 1. Check in-memory state cache with mutex poison recovery
+        // 1. Check in-memory state LRU cache with mutex poison recovery
         {
-            let guard = self.account_cache.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self.account_cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = guard.get(&address) {
-                return Ok(Some(cached.clone()));
+                return Ok(Some(cached));
             }
         }
 
@@ -121,14 +122,9 @@ impl DatabaseRef for RpcDb {
             ..Default::default()
         };
 
-        // Cache the fetched account state with capacity bound
+        // Cache the fetched account state in O(1) LRU
         {
             let mut guard = self.account_cache.lock().unwrap_or_else(|e| e.into_inner());
-            if guard.len() >= MAX_ACCOUNT_CACHE_CAPACITY {
-                if let Some(first_key) = guard.keys().next().cloned() {
-                    guard.remove(&first_key);
-                }
-            }
             guard.insert(address, account_info.clone());
         }
 
@@ -142,10 +138,10 @@ impl DatabaseRef for RpcDb {
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        // 1. Check in-memory storage cache with mutex poison recovery
+        // 1. Check in-memory storage LRU cache with mutex poison recovery
         {
-            let guard = self.storage_cache.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(&cached_val) = guard.get(&(address, index)) {
+            let mut guard = self.storage_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cached_val) = guard.get(&(address, index)) {
                 return Ok(cached_val);
             }
         }
@@ -158,14 +154,9 @@ impl DatabaseRef for RpcDb {
         let val = U256::from_str(val_str)
             .map_err(|e| RpcDbError(format!("Failed to parse storage value '{}': {}", val_str, e)))?;
 
-        // Cache the fetched storage slot with capacity bound
+        // Cache the fetched storage slot in O(1) LRU
         {
             let mut guard = self.storage_cache.lock().unwrap_or_else(|e| e.into_inner());
-            if guard.len() >= MAX_STORAGE_CACHE_CAPACITY {
-                if let Some(first_key) = guard.keys().next().cloned() {
-                    guard.remove(&first_key);
-                }
-            }
             guard.insert((address, index), val);
         }
 

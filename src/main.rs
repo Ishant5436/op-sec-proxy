@@ -5,6 +5,7 @@ mod interceptor;
 mod decoder;
 mod fork_db;
 mod simulator;
+mod lru;
 
 fn mask_rpc_url(url: &str) -> String {
     if let Some((scheme_host, _)) = url.split_once("/v2/") {
