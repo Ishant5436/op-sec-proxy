@@ -5,9 +5,25 @@ use revm::primitives::TxKind;
 use revm::database::WrapDatabaseRef;
 use crate::fork_db::RpcDb;
 
-pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, String> {
+/// Structured revert payload emitted when a transaction is blocked.
+#[derive(Debug, Clone)]
+pub struct BlockedTx {
+    pub message: String,
+    pub revert_data_hex: Option<String>,
+    pub decoded_reason: Option<String>,
+    pub gas_used: u64,
+    pub gas_limit: u64,
+}
+
+pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
     // 1. Recover the sender address
-    let caller = tx_env.recover_signer().map_err(|e| format!("Failed to recover signer: {:?}", e))?;
+    let caller = tx_env.recover_signer().map_err(|e| BlockedTx {
+        message: format!("Failed to recover signer: {:?}", e),
+        revert_data_hex: None,
+        decoded_reason: None,
+        gas_used: 0,
+        gas_limit: 0,
+    })?;
     
     // 2. Setup the EVM context and database
     let db_wrapper = WrapDatabaseRef(db);
@@ -34,11 +50,23 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, String> {
         .data(data)
         .gas_limit(gas_limit)
         .build()
-        .map_err(|e| format!("Failed to build revm TxEnv: {:?}", e))?;
+        .map_err(|e| BlockedTx {
+            message: format!("Failed to build revm TxEnv: {:?}", e),
+            revert_data_hex: None,
+            decoded_reason: None,
+            gas_used: 0,
+            gas_limit,
+        })?;
         
     // 5. Execute the simulation
     let sim_result = evm.transact(revm_tx)
-        .map_err(|e| format!("Simulation execution error: {:?}", e))?;
+        .map_err(|e| BlockedTx {
+            message: format!("Simulation execution error: {:?}", e),
+            revert_data_hex: None,
+            decoded_reason: None,
+            gas_used: 0,
+            gas_limit,
+        })?;
         
     // 6. Security Analysis
     let gas_used = sim_result.result.gas().tx_gas_used();
@@ -46,26 +74,58 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, String> {
     if sim_result.result.is_success() {
         // Rule 2: Max Gas Overhead Heuristic
         if gas_used > 0 && gas_used >= gas_limit {
-            return Err(format!("Transaction consumes entire gas limit ({}). Potential DoS or infinite loop.", gas_used));
+            return Err(BlockedTx {
+                message: format!("Transaction consumes entire gas limit ({}). Potential DoS or infinite loop.", gas_used),
+                revert_data_hex: None,
+                decoded_reason: None,
+                gas_used,
+                gas_limit,
+            });
         }
         Ok(true)
     } else if sim_result.result.is_halt() {
-        Err("Transaction halted".to_string())
+        Err(BlockedTx {
+            message: "Transaction halted".to_string(),
+            revert_data_hex: None,
+            decoded_reason: None,
+            gas_used,
+            gas_limit,
+        })
     } else {
         // Rule 3: Decoded Revert Detection (Milestone 1 Deliverable)
         if let Some(output) = sim_result.result.output() {
-            let hex_output = alloy::hex::encode(output);
+            let hex_output = format!("0x{}", alloy::hex::encode(output));
+            let mut decoded: Option<String> = None;
+
             if output.len() >= 68 && output[0..4] == [0x08, 0xc3, 0x79, 0xa0] {
                 if let Ok(reason) = std::str::from_utf8(&output[68..]) {
                     let clean = reason.trim_matches(char::from(0)).trim();
                     if !clean.is_empty() {
-                        return Err(format!("Transaction reverted: {} (0x{})", clean, hex_output));
+                        decoded = Some(clean.to_string());
                     }
                 }
             }
-            return Err(format!("Transaction reverted during simulation (0x{})", hex_output));
+
+            let msg = match &decoded {
+                Some(r) => format!("Execution reverted: {}", r),
+                None => format!("Transaction reverted during simulation ({})", &hex_output),
+            };
+
+            return Err(BlockedTx {
+                message: msg,
+                revert_data_hex: Some(hex_output),
+                decoded_reason: decoded,
+                gas_used,
+                gas_limit,
+            });
         }
-        Err("Transaction reverted during simulation".to_string())
+        Err(BlockedTx {
+            message: "Transaction reverted during simulation".to_string(),
+            revert_data_hex: None,
+            decoded_reason: None,
+            gas_used,
+            gas_limit,
+        })
     }
 }
 
@@ -172,7 +232,7 @@ mod tests {
         
         // Because gas_used == gas_limit (21000 == 21000), it triggers the heuristic block
         assert!(res.is_err());
-        assert!(res.unwrap_err().contains("consumes entire gas limit"));
+        assert!(res.unwrap_err().message.contains("consumes entire gas limit"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -189,7 +249,7 @@ mod tests {
         
         // Revm errors out before execution if sender lacks balance for value + gas
         assert!(res.is_err());
-        let err = res.unwrap_err();
-        assert!(err.contains("Simulation execution error"));
+        let blocked = res.unwrap_err();
+        assert!(blocked.message.contains("Simulation execution error"));
     }
 }

@@ -1,27 +1,38 @@
 use serde_json::{json, Value};
+use std::time::Instant;
 use crate::decoder::decode_tx;
 use crate::fork_db::RpcDb;
 use crate::simulator::simulate_tx;
 
+/// Intercepts eth_sendRawTransaction and eth_sendTransaction,
+/// simulates via revm, and returns a structured JSON-RPC -32000 error
+/// with revert_data, decoded_reason, estimated_gas_saved, and
+/// simulation_latency_ms when the transaction would revert on-chain.
 pub fn check_payload(payload: &Value, upstream_url: &str) -> Result<(), Value> {
-    if payload.get("method").and_then(|v| v.as_str()) == Some("eth_sendRawTransaction") {
+    let method = payload.get("method").and_then(|v| v.as_str()).unwrap_or("");
+
+    if method == "eth_sendRawTransaction" || method == "eth_sendTransaction" {
         let id = payload.get("id").cloned().unwrap_or(json!(null));
-        
-        let block_req = |msg: &str| -> Value {
-            json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {
-                    "code": -32000,
-                    "message": format!("AESI: Transaction Blocked by Security Heuristics ({})", msg)
-                }
-            })
-        };
+        let sim_start = Instant::now();
 
         // 1. Decode transaction
         let tx_env = match decode_tx(payload) {
             Ok(tx) => tx,
-            Err(e) => return Err(block_req(&format!("decode error: {}", e))),
+            Err(e) => {
+                let elapsed_ms = sim_start.elapsed().as_millis() as u64;
+                return Err(json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32000,
+                        "message": format!("Execution reverted: decode error: {}", e),
+                        "data": {
+                            "decoded_reason": format!("decode error: {}", e),
+                            "simulation_latency_ms": elapsed_ms
+                        }
+                    }
+                }));
+            }
         };
 
         // 2. Initialize Fork Database
@@ -34,10 +45,49 @@ pub fn check_payload(payload: &Value, upstream_url: &str) -> Result<(), Value> {
                 return Ok(());
             }
             Ok(false) => {
-                return Err(block_req("simulation flagged transaction"));
+                let elapsed_ms = sim_start.elapsed().as_millis() as u64;
+                return Err(json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32000,
+                        "message": "Execution reverted: simulation flagged transaction",
+                        "data": {
+                            "decoded_reason": "simulation flagged transaction",
+                            "simulation_latency_ms": elapsed_ms
+                        }
+                    }
+                }));
             }
-            Err(e) => {
-                return Err(block_req(&e));
+            Err(blocked) => {
+                let elapsed_ms = sim_start.elapsed().as_millis() as u64;
+                let estimated_gas_saved = if blocked.gas_used > 0 {
+                    blocked.gas_used
+                } else {
+                    blocked.gas_limit
+                };
+
+                let mut data_obj = json!({
+                    "estimated_gas_saved": estimated_gas_saved,
+                    "simulation_latency_ms": elapsed_ms
+                });
+
+                if let Some(ref rd) = blocked.revert_data_hex {
+                    data_obj["revert_data"] = json!(rd);
+                }
+                if let Some(ref dr) = blocked.decoded_reason {
+                    data_obj["decoded_reason"] = json!(dr);
+                }
+
+                return Err(json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32000,
+                        "message": blocked.message,
+                        "data": data_obj
+                    }
+                }));
             }
         }
     }

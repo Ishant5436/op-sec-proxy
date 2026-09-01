@@ -19,9 +19,11 @@ When connected through **OP Security Proxy**, outbound `eth_sendRawTransaction` 
 ┌────────────────────────────────────────────────────────┐
 │                   OP Security Proxy                    │
 │                                                        │
-│  1. Forks OP L2 State locally in revm (<50ms)          │
+│  1. Forks OP L2 State locally in revm (~2.9s*)         │
 │  2. Executes transaction in zero-trust sandbox         │
 │  3. If Reverted: Intercepts & returns JSON-RPC -32000  │
+│                                                        │
+│  *With planned LRU state caching: target <50ms         │
 └──────────────────────────┬─────────────────────────────┘
                            │
        ┌───────────────────┴───────────────────┐
@@ -31,6 +33,7 @@ When connected through **OP Security Proxy**, outbound `eth_sendRawTransaction` 
 │ Return Revert Error Payload  │    │ Broadcast to OP Sequencer    │
 │ • decoded_reason             │    │ • Real Transaction Hash      │
 │ • estimated_gas_saved        │    │ • Confirmed On-Chain Receipt │
+│ • simulation_latency_ms      │    │                              │
 └──────────────┬───────────────┘    └──────────────────────────────┘
                │
                ▼
@@ -39,7 +42,7 @@ When connected through **OP Security Proxy**, outbound `eth_sendRawTransaction` 
 │                                                        │
 │  Renders UI Banner:                                    │
 │  "⚠️ Transaction Blocked: Insufficient Allowance"       │
-│  "🛡️ Protected by OP Security: $0.42 gas saved"         │
+│  "🛡️ Protected by OP Security: 210,000 gas units saved" │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -66,6 +69,15 @@ When a transaction would revert on-chain, the proxy intercepts the RPC call and 
 }
 ```
 
+**Field reference:**
+
+| Field | Type | Description |
+|---|---|---|
+| `revert_data` | `string` | Raw ABI-encoded revert bytes (hex). Present when revm produces output. |
+| `decoded_reason` | `string` | Human-readable revert string decoded from `Error(string)` or `Panic(uint256)`. |
+| `estimated_gas_saved` | `number` | Gas units the user would have burned on-chain. |
+| `simulation_latency_ms` | `number` | Wall-clock milliseconds the local simulation took. |
+
 ---
 
 ## 3. Client Integration (TypeScript / React Native)
@@ -77,7 +89,7 @@ import { OpSecClient, RevertBlockedError } from "@op-sec/client";
 
 // 1. Initialize client pointing to OP Security Proxy
 const opSec = new OpSecClient({
-  proxyUrl: "https://proxy.op-security.org", // Or local node: http://localhost:8545
+  proxyUrl: "http://localhost:3000", // Default local proxy port
   fallbackRpcUrl: "https://mainnet.optimism.io"
 });
 
@@ -97,10 +109,10 @@ async function sendTransactionWithProtection(signedTxHex: string) {
     if (error instanceof RevertBlockedError) {
       // User lost $0 in gas fees!
       console.warn("Preemptively Blocked Revert:", error.decodedReason);
-      console.info("Estimated Gas Saved (Wei):", error.estimatedGasSaved);
+      console.info("Estimated Gas Saved:", error.estimatedGasSaved);
 
-      // Render User-Facing Alert in GemWallet
-      displayGasProtectionBanner({
+      // Render your wallet's own UI banner here:
+      yourWalletUI.showGasProtectionBanner({
         title: "Transaction Safely Intercepted",
         reason: error.decodedReason || "Transaction would have failed on-chain",
         gasSaved: error.estimatedGasSaved
@@ -119,7 +131,7 @@ async function sendTransactionWithProtection(signedTxHex: string) {
 
 ## 4. Drop-In EIP-1193 Provider Hook
 
-For wallets using standard Web3 provider providers (`window.ethereum` or mobile Web3 webviews):
+For wallets using standard Web3 providers (`window.ethereum` or mobile Web3 webviews):
 
 ```typescript
 import { decodeStandardRevert } from "@op-sec/client";
@@ -129,7 +141,8 @@ export function handleWalletRpcError(error: any) {
     return {
       isRevert: true,
       message: `Transaction stopped: ${error.data.decoded_reason}`,
-      gasSavedWei: error.data.estimated_gas_saved || 0
+      gasSavedWei: error.data.estimated_gas_saved || 0,
+      latencyMs: error.data.simulation_latency_ms || 0
     };
   }
   
@@ -152,5 +165,6 @@ export function handleWalletRpcError(error: any) {
 
 ## 5. Support & Security Invariants
 * **Zero Private Key Exposure:** The proxy only handles signed raw bytes (`eth_sendRawTransaction`); it never touches private keys.
+* **Both Send Methods Intercepted:** `eth_sendRawTransaction` and `eth_sendTransaction` are both simulated before broadcast.
 * **Open Source:** Permissive MIT License.
 * **Repository:** [https://github.com/Ishant5436/op-sec-proxy](https://github.com/Ishant5436/op-sec-proxy)

@@ -22,15 +22,20 @@ fn interceptor_blocks_eth_send_raw_transaction() {
 
     let err = result.unwrap_err();
     assert_eq!(err["error"]["code"], -32000);
-    // M2: error message now includes the specific failure reason from simulation
+    // Error message now uses structured format instead of AESI prefix
     let msg = err["error"]["message"].as_str().unwrap();
     assert!(
-        msg.starts_with("AESI: Transaction Blocked by Security Heuristics"),
-        "Error message should start with AESI prefix, got: {}",
+        msg.contains("reverted") || msg.contains("error"),
+        "Error message should describe the revert, got: {}",
         msg
     );
     assert_eq!(err["id"], 1, "Error response must preserve the original id");
     assert_eq!(err["jsonrpc"], "2.0");
+    // Verify structured data object is present with simulation_latency_ms
+    assert!(
+        err["error"]["data"]["simulation_latency_ms"].is_number(),
+        "Structured data must include simulation_latency_ms"
+    );
 }
 
 #[test]
@@ -179,10 +184,9 @@ fn interceptor_is_case_sensitive() {
 
 #[test]
 fn interceptor_rejects_only_exact_method_name() {
-    // Should NOT block similar method names
+    // Should NOT block similar-but-distinct method names
     let similar_methods = vec![
         "eth_sendRawTransaction_v2",
-        "eth_sendTransaction",
         "eth_sendRawTransactio",
         "debug_sendRawTransaction",
     ];
@@ -199,6 +203,18 @@ fn interceptor_rejects_only_exact_method_name() {
             method
         );
     }
+
+    // eth_sendTransaction IS now intercepted (same as eth_sendRawTransaction)
+    let send_tx_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_sendTransaction",
+        "params": ["0xdeadbeef"],
+        "id": 1
+    });
+    assert!(
+        check_payload(&send_tx_payload, TEST_UPSTREAM).is_err(),
+        "eth_sendTransaction must now be intercepted"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -256,11 +272,16 @@ async fn server_intercepts_send_raw_transaction() {
     assert_eq!(body["error"]["code"], -32000);
     let msg = body["error"]["message"].as_str().unwrap();
     assert!(
-        msg.starts_with("AESI: Transaction Blocked by Security Heuristics"),
-        "Error message should start with AESI prefix, got: {}",
+        msg.contains("reverted") || msg.contains("error"),
+        "Error message should describe the revert, got: {}",
         msg
     );
     assert_eq!(body["id"], 42);
+    // Verify structured data object is present
+    assert!(
+        body["error"]["data"]["simulation_latency_ms"].is_number(),
+        "Structured data must include simulation_latency_ms"
+    );
 }
 
 #[tokio::test]
