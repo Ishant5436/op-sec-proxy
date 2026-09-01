@@ -398,7 +398,7 @@
       <!-- Left Column: Interactive Simulation Sandbox -->
       <div class="panel">
         <div class="panel-header">
-          <div class="panel-title">🛡️ Zero-Trust Simulation Sandbox</div>
+          <div class="panel-title">[GUARD]  Zero-Trust Simulation Sandbox</div>
         </div>
 
         <div class="form-group">
@@ -415,10 +415,10 @@
         <div class="form-group">
           <label>Pre-Built Attack & Failure Scenarios</label>
           <div class="scenario-buttons">
-            <button class="btn" onclick="loadScenario('allowance')">⚠️ Allowance Revert</button>
-            <button class="btn" onclick="loadScenario('slippage')">📉 Slippage Revert</button>
-            <button class="btn" onclick="loadScenario('overflow')">💥 Overflow Panic</button>
-            <button class="btn" onclick="loadScenario('safe')">🟢 Safe Read Call</button>
+            <button class="btn" onclick="loadScenario('allowance')">[WARN]  Allowance Revert</button>
+            <button class="btn" onclick="loadScenario('slippage')">[REVERT]  Slippage Revert</button>
+            <button class="btn" onclick="loadScenario('overflow')">[PANIC]  Overflow Panic</button>
+            <button class="btn" onclick="loadScenario('safe')">[SAFE]  Safe Read Call</button>
           </div>
         </div>
 
@@ -427,13 +427,13 @@
           <textarea id="rpcPayload" rows="7"></textarea>
         </div>
 
-        <button class="btn primary" onclick="dispatchSimulation()">⚡ Simulate & Send via Proxy</button>
+        <button class="btn primary" onclick="dispatchSimulation()">[SIMULATE]  Simulate & Send via Proxy</button>
       </div>
 
       <!-- Right Column: Real-Time Interception Stream & Telemetry -->
       <div class="panel">
         <div class="panel-header">
-          <div class="panel-title">📡 Live Interception Stream</div>
+          <div class="panel-title">[STREAM]  Live Interception Stream</div>
           <button class="btn" style="padding: 4px 10px; font-size: 0.75rem;" onclick="clearFeed()">Clear Feed</button>
         </div>
 
@@ -442,7 +442,7 @@
         </div>
 
         <div class="panel-header" style="margin-top: 12px; padding-top: 12px;">
-          <div class="panel-title" style="font-size: 0.9rem;">📈 Cumulative Gas Protection History</div>
+          <div class="panel-title" style="font-size: 0.9rem;">[METRICS]  Cumulative Gas Protection History</div>
         </div>
         <div class="chart-container">
           <canvas id="gasChart"></canvas>
@@ -504,8 +504,8 @@
         </div>
         <div class="feed-reason">${reason}</div>
         <div class="feed-meta">
-          <span>🛡️ Gas Saved: ${gasSaved.toLocaleString()} units</span>
-          <span>⏱️ Latency: ${latency}ms</span>
+          <span>[GUARD]  Gas Saved: ${gasSaved.toLocaleString()} units</span>
+          <span>[LATENCY]  Latency: ${latency}ms</span>
         </div>
       `;
       feed.prepend(item);
