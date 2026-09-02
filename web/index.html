@@ -458,7 +458,17 @@
     let blockedCount = 2;
     let historyPoints = [50000, 120000, 210000, 310000, 420000];
 
-    const PROXY_URL = "http://localhost:3000";
+    const PROXY_URL = window.location.port ? `${window.location.protocol}//${window.location.hostname}:${window.location.port}` : "http://localhost:3000";
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
 
     const SCENARIOS = {
       allowance: {
@@ -494,18 +504,19 @@
     function addFeedItem(type, reason, gasSaved, latency) {
       const feed = document.getElementById('feedContainer');
       const item = document.createElement('div');
-      item.className = `feed-item ${type.toLowerCase()}`;
+      const safeType = escapeHtml(type);
+      item.className = `feed-item ${safeType.toLowerCase()}`;
       
       const timeStr = new Date().toLocaleTimeString();
       item.innerHTML = `
         <div class="feed-top">
-          <span class="badge ${type.toLowerCase()}">${type}</span>
+          <span class="badge ${safeType.toLowerCase()}">${safeType}</span>
           <span style="color: var(--text-muted); font-size: 0.72rem;">${timeStr}</span>
         </div>
-        <div class="feed-reason">${reason}</div>
+        <div class="feed-reason">${escapeHtml(reason)}</div>
         <div class="feed-meta">
-          <span>[GUARD]  Gas Saved: ${gasSaved.toLocaleString()} units</span>
-          <span>[LATENCY]  Latency: ${latency}ms</span>
+          <span>[GUARD]  Gas Saved: ${Number(gasSaved).toLocaleString()} units</span>
+          <span>[LATENCY]  Latency: ${Number(latency)}ms</span>
         </div>
       `;
       feed.prepend(item);

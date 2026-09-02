@@ -1,5 +1,5 @@
 # Multi-stage production build for OP Security Proxy
-FROM rust:1.80-bullseye as builder
+FROM rust:1.85-bullseye as builder
 
 WORKDIR /usr/src/op-sec-proxy
 COPY Cargo.toml Cargo.lock ./
