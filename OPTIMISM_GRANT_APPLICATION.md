@@ -1,6 +1,6 @@
 # Optimism Builder Grant Application: OP Security Proxy
 
-**Grant Program:** Optimism Foundation Builder Grants (Season 7)  
+**Grant Program:** Optimism Foundation Builder Grants  
 **Track:** Developer Tooling & Superchain Public Goods  
 **Requested Amount:** 10,000 OP (~$15,000 USD equivalent)  
 **Project Repository:** [https://github.com/Ishant5436/op-sec-proxy](https://github.com/Ishant5436/op-sec-proxy)  
@@ -48,7 +48,7 @@ On EVM networks, users pay transaction fees even when transactions revert on-cha
 
 ### Milestone 1: In-Memory LRU State Cache & Revert Decoder
 * **Deliverable:** Replace full-network RPC state fetching with a multi-level in-memory LRU trie cache for warm contract bytecode, balances, and storage slots.
-* **KPI / Target:** Reduce simulation latency from ~2,900 ms down to **< 65 ms** for frequent DeFi interactions (Velodrome, Uniswap pools).
+* **KPI / Target:** Reduce simulation latency from ~2,700 ms down to **< 65 ms** for frequent DeFi interactions (Velodrome, Uniswap pools).
 * **Deliverable:** Integrated 4-byte selector decoding for standard errors (`Error(string)`, `Panic(uint256)`) and custom Solidity revert signatures.
 * **Funding:** 3,333 OP (~$5,000 USD).
 
@@ -67,12 +67,12 @@ On EVM networks, users pay transaction fees even when transactions revert on-cha
 
 ## 4. Total Budget Breakdown
 
-| Budget Category | Description | Amount |
-|---|---|:---:|
-| **Engineering & Rust Development** | Core `revm` state cache, EVM simulator, and connection pool | 5,000 OP |
-| **Wallet Tooling & SDK** | TypeScript integration library, documentation, demo client | 3,000 OP |
-| **Superchain Multi-Chain & QA** | Base/Mode/Zora testing, Docker packaging, benchmark suite | 2,000 OP |
-| **Total Requested** | **Optimism Foundation Builder Grant** | **10,000 OP (~$15,000)** |
+| Milestone | Deliverable Scope | Requested OP | USD Equivalent |
+|---|---|:---:|:---:|
+| **Milestone 1** | In-Memory LRU State Cache & 4-Byte Revert Decoder | 3,333 OP | ~$5,000 |
+| **Milestone 2** | Wallet Integration SDK & Standardized Error Interception | 3,333 OP | ~$5,000 |
+| **Milestone 3** | Superchain Multi-Chain Routing & Production Packaging | 3,334 OP | ~$5,000 |
+| **Total Requested** | **Optimism Foundation Builder Grant** | **10,000 OP** | **~$15,000** |
 
 ---
 
