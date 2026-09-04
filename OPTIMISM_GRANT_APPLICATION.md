@@ -27,8 +27,9 @@ On EVM networks, users pay transaction fees even when transactions revert on-cha
 ## 2. Current Implementation & Technical Evidence
 
 * **Core Engine:** Built in Rust using `tokio` (async runtime), `hyper` (HTTP server), `alloy` (Ethereum types), and `revm` (in-memory execution).
-* **Test Coverage:** 26 automated unit and integration tests passing (`cargo test`).
-* **Routing Overhead:** Measured at **-71.76 ms** relative to direct upstream RPC on standard non-mutating calls (`eth_blockNumber`, `eth_call`) due to connection pooling (`hyper` connection pool).
+* **Test Coverage:** 40 automated tests passing across the Rust core and TypeScript client SDK (`make test`).
+* **Routing Overhead:** Measured at **+11.80 ms** processing overhead on warm keep-alive sessions, and **-97.09 ms** latency reduction on cold requests via Hyper connection pool reuse (see `BENCHMARK_RESULTS.md`).
+* **Simulation Baseline:** Uncached remote RPC simulation currently averages ~2.7s; Milestone 1 targets dropping this to **< 65 ms** via local state trie caching.
 * **Open Source:** Permissive MIT License.
 
 ---
@@ -77,20 +78,22 @@ On EVM networks, users pay transaction fees even when transactions revert on-cha
 
 ## 5. Ecosystem Impact & Alignment
 
-* **User Protection:** Prevents thousands of failed transaction gas burns for Superchain users.
-* **Sequencer Efficiency:** Decreases mempool congestion by filtering out unviable transactions before they reach the block builder.
-* **Ecosystem Feedback:** Actively discussed on the [Optimism Governance Forum (#10810)](https://gov.optimism.io/t/op-security-proxy-a-local-rpc-middleware-to-prevent-paying-for-failed-l2-executions/10810) with community delegates and wallet developers.
+* **User Protection:** Prevents failed transaction gas burns for Superchain users and programmatic agents.
+* **Sequencer Efficiency:** Decreases mempool congestion by filtering out reverting payloads before broadcast.
+* **Community Introduction:** Initial project introduction published on the [Optimism Governance Forum (#10810)](https://gov.optimism.io/t/op-security-proxy-a-local-rpc-middleware-to-prevent-paying-for-failed-l2-executions/10810).
 
 ---
 
 ## 6. Verification & Reproducibility
 
 ```bash
-# 1. Clone & Test Rust Suite (26/26 Tests Passing)
+# 1. Clone & Run Test Suite (40/40 Tests Passing)
 git clone https://github.com/Ishant5436/op-sec-proxy.git
 cd op-sec-proxy
-cargo test
+make test
 
-# 2. Run Local Proxy Server
-cargo run -- --rpc-url https://mainnet.optimism.io --port 8545
+# 2. Run Benchmarks Against Live Optimism Mainnet
+cargo build --release
+PROXY_PORT=8080 OP_RPC_URL=https://mainnet.optimism.io ./target/release/op-sec-proxy &
+python3 scripts/benchmark.py
 ```
