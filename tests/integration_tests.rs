@@ -388,15 +388,70 @@ async fn spawn_test_server() -> u16 {
     port
 }
 
-/// Spawns a test server with the real Optimism public RPC upstream.
+/// Spawns a test server with a local deterministic JSON-RPC upstream that responds with OP Mainnet values.
+/// Eliminates external network latency, rate limits, and flakiness from public RPC providers.
 async fn spawn_test_server_with_upstream() -> u16 {
+    let mock_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind mock upstream port");
+    let mock_port = mock_listener.local_addr().unwrap().port();
+    let upstream_url = format!("http://127.0.0.1:{}", mock_port);
+
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = match mock_listener.accept().await {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+            let io = hyper_util::rt::TokioIo::new(stream);
+            tokio::spawn(async move {
+                use http_body_util::BodyExt;
+                let service = hyper::service::service_fn(|req: hyper::Request<hyper::body::Incoming>| async move {
+                    let body_bytes = req.into_body().collect().await.map(|c| c.to_bytes()).unwrap_or_default();
+                    let val: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or_default();
+                    let method = val["method"].as_str().unwrap_or("");
+                    let id = val.get("id").cloned().unwrap_or(serde_json::Value::Null);
+
+                    let resp_body = match method {
+                        "eth_chainId" => serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": "0xa"
+                        }),
+                        "eth_blockNumber" => serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": "0x123456"
+                        }),
+                        _ => serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": "0x0"
+                        }),
+                    };
+
+                    let resp = hyper::Response::builder()
+                        .header("content-type", "application/json")
+                        .body(http_body_util::Full::new(hyper::body::Bytes::from(resp_body.to_string())))
+                        .unwrap();
+                    Ok::<_, hyper::Error>(resp)
+                });
+
+                hyper::server::conn::http1::Builder::new()
+                    .serve_connection(io, service)
+                    .await
+                    .ok();
+            });
+        }
+    });
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("Failed to bind test port");
     let port = listener.local_addr().unwrap().port();
 
     tokio::spawn(async move {
-        op_sec_proxy::server::run_server_listener(listener, "https://mainnet.optimism.io".to_string())
+        op_sec_proxy::server::run_server_listener(listener, upstream_url)
             .await
             .ok();
     });
