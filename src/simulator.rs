@@ -124,7 +124,7 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
 
             let msg = match &decoded {
                 Some(r) => format!("Execution reverted: {}", r),
-                None => format!("Transaction reverted during simulation ({})", &hex_output),
+                None => format!("Transaction reverted during simulation ({})", hex_output),
             };
 
             return Err(BlockedTx {
