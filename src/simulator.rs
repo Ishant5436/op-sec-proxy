@@ -104,6 +104,22 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
                         decoded = Some(clean.to_string());
                     }
                 }
+            } else if output.len() >= 36 && output[0..4] == [0x4e, 0x48, 0x7b, 0x71] {
+                // Solidity Panic(uint256) selector 0x4e487b71 + 32-byte big-endian code
+                let code_byte = output[35];
+                let reason = match code_byte {
+                    0x01 => "Panic: Assert failed",
+                    0x11 => "Panic: Arithmetic overflow / underflow",
+                    0x12 => "Panic: Division by zero",
+                    0x21 => "Panic: Invalid enum value conversion",
+                    0x22 => "Panic: Storage byte array encoding error",
+                    0x31 => "Panic: Empty array pop",
+                    0x32 => "Panic: Array index out of bounds",
+                    0x41 => "Panic: Allocation of too much memory",
+                    0x51 => "Panic: Zero initialized internal function pointer",
+                    _ => "Panic: Unrecognized panic code",
+                };
+                decoded = Some(format!("{} (0x{:02x})", reason, code_byte));
             }
 
             let msg = match &decoded {
@@ -252,4 +268,23 @@ mod tests {
         let blocked = res.unwrap_err();
         assert!(blocked.message.contains("Simulation execution error"));
     }
+
+    #[test]
+    fn test_panic_code_decoding_logic() {
+        // Selector 0x4e487b71 + 31 zero bytes + 0x11 (Arithmetic overflow)
+        let mut overflow_panic = vec![0x4e, 0x48, 0x7b, 0x71];
+        overflow_panic.extend(vec![0u8; 31]);
+        overflow_panic.push(0x11);
+
+        assert_eq!(overflow_panic.len(), 36);
+        assert_eq!(overflow_panic[0..4], [0x4e, 0x48, 0x7b, 0x71]);
+        assert_eq!(overflow_panic[35], 0x11);
+
+        // Division by zero 0x12
+        let mut div_zero_panic = vec![0x4e, 0x48, 0x7b, 0x71];
+        div_zero_panic.extend(vec![0u8; 31]);
+        div_zero_panic.push(0x12);
+        assert_eq!(div_zero_panic[35], 0x12);
+    }
 }
+
