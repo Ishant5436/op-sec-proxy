@@ -74,20 +74,6 @@ async fn handle_request(
     }
 
     if req.method() == hyper::Method::POST {
-        // Fast-path Content-Length header validation to prevent buffering oversized requests
-        if req
-            .headers()
-            .get(hyper::header::CONTENT_LENGTH)
-            .and_then(|h| h.to_str().ok())
-            .and_then(|s| s.parse::<usize>().ok())
-            .is_some_and(|cl| cl > MAX_REQUEST_BODY_SIZE)
-        {
-            return Ok(build_json_response(
-                r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Request body too large: max allowed is 2MB"}}"#.to_string(),
-                StatusCode::PAYLOAD_TOO_LARGE,
-            ));
-        }
-
         // Bounded stream collection: enforce MAX_REQUEST_BODY_SIZE even for chunked / unannounced transfers
         let limited_body = http_body_util::Limited::new(req.into_body(), MAX_REQUEST_BODY_SIZE);
         let body_bytes = match limited_body.collect().await {

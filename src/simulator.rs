@@ -232,7 +232,7 @@ mod tests {
         }).await.unwrap();
         
         assert!(res.is_ok());
-        assert_eq!(res.unwrap(), true);
+        assert!(res.unwrap());
     }
 
     #[tokio::test(flavor = "multi_thread")]
