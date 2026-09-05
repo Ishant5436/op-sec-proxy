@@ -20,6 +20,11 @@ struct AppState {
 pub async fn run_server(port: u16, upstream_url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(addr).await?;
+    run_server_listener(listener, upstream_url).await
+}
+
+pub async fn run_server_listener(listener: TcpListener, upstream_url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let addr = listener.local_addr()?;
     println!("AESI Proxy listening on http://{}", addr);
 
     let state = AppState {
@@ -43,13 +48,15 @@ pub async fn run_server(port: u16, upstream_url: String) -> Result<(), Box<dyn s
     }
 }
 
+pub const MAX_REQUEST_BODY_SIZE: usize = 2 * 1024 * 1024; // 2 MB
+
 fn build_json_response(body_str: String, status: StatusCode) -> Response<Full<Bytes>> {
     let mut resp = Response::new(Full::new(Bytes::from(body_str)));
     *resp.status_mut() = status;
     resp.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
     resp.headers_mut().insert("Access-Control-Allow-Origin", "*".parse().unwrap());
     resp.headers_mut().insert("Access-Control-Allow-Methods", "POST, OPTIONS".parse().unwrap());
-    resp.headers_mut().insert("Access-Control-Allow-Headers", "Content-Type, Authorization".parse().unwrap());
+    resp.headers_mut().insert("Access-Control-Allow-Headers", "Content-Type".parse().unwrap());
     resp
 }
 
@@ -62,18 +69,43 @@ async fn handle_request(
         *preflight.status_mut() = StatusCode::NO_CONTENT;
         preflight.headers_mut().insert("Access-Control-Allow-Origin", "*".parse().unwrap());
         preflight.headers_mut().insert("Access-Control-Allow-Methods", "POST, OPTIONS".parse().unwrap());
-        preflight.headers_mut().insert("Access-Control-Allow-Headers", "Content-Type, Authorization".parse().unwrap());
+        preflight.headers_mut().insert("Access-Control-Allow-Headers", "Content-Type".parse().unwrap());
         return Ok(preflight);
     }
 
     if req.method() == hyper::Method::POST {
-        let body_bytes = match req.into_body().collect().await {
+        // Fast-path Content-Length header validation to prevent buffering oversized requests
+        if let Some(cl_header) = req.headers().get(hyper::header::CONTENT_LENGTH) {
+            if let Ok(cl_str) = cl_header.to_str() {
+                if let Ok(cl) = cl_str.parse::<usize>() {
+                    if cl > MAX_REQUEST_BODY_SIZE {
+                        return Ok(build_json_response(
+                            r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Request body too large: max allowed is 2MB"}}"#.to_string(),
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Bounded stream collection: enforce MAX_REQUEST_BODY_SIZE even for chunked / unannounced transfers
+        let limited_body = http_body_util::Limited::new(req.into_body(), MAX_REQUEST_BODY_SIZE);
+        let body_bytes = match limited_body.collect().await {
             Ok(collected) => collected.to_bytes(),
-            Err(_) => {
-                return Ok(build_json_response(
-                    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#.to_string(),
-                    StatusCode::BAD_REQUEST
-                ));
+            Err(err) => {
+                let is_overflow = err.downcast_ref::<http_body_util::LengthLimitError>().is_some();
+                let (status, msg) = if is_overflow {
+                    (
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Request body too large: max allowed is 2MB"}}"#,
+                    )
+                } else {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#,
+                    )
+                };
+                return Ok(build_json_response(msg.to_string(), status));
             }
         };
         

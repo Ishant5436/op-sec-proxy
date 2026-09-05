@@ -337,6 +337,35 @@ async fn server_forwards_block_number_and_returns_hex() {
     assert_eq!(body["id"], 99, "Response id must match request id");
 }
 
+#[tokio::test]
+async fn server_rejects_payload_exceeding_body_size_limit() {
+    let port = spawn_test_server().await;
+
+    // Construct a payload strictly exceeding MAX_REQUEST_BODY_SIZE (2MB + 100KB)
+    let padding = "a".repeat(2 * 1024 * 1024 + 100 * 1024);
+    let oversized_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_blockNumber",
+        "params": [padding],
+        "id": 100
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}", port))
+        .json(&oversized_payload)
+        .send()
+        .await
+        .expect("POST request should receive response");
+
+    assert_eq!(resp.status(), 413, "Server must return 413 Payload Too Large");
+    let body: Value = resp.json().await.expect("Response should be valid JSON-RPC error");
+    assert_eq!(body["error"]["code"], -32600);
+    assert!(
+        body["error"]["message"].as_str().unwrap().contains("Request body too large"),
+        "Error message should explain body size limit"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  TEST HELPERS
 // ═══════════════════════════════════════════════════════════════════
@@ -348,17 +377,14 @@ async fn spawn_test_server() -> u16 {
         .await
         .expect("Failed to bind test port");
     let port = listener.local_addr().unwrap().port();
-    drop(listener); // Release the port so the server can bind it
 
     tokio::spawn(async move {
         // Use a non-routable address so forwarding errors out quickly
-        op_sec_proxy::server::run_server(port, "http://192.0.2.1:1".to_string())
+        op_sec_proxy::server::run_server_listener(listener, "http://192.0.2.1:1".to_string())
             .await
             .ok();
     });
 
-    // Give the server a moment to start
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     port
 }
 
@@ -368,14 +394,12 @@ async fn spawn_test_server_with_upstream() -> u16 {
         .await
         .expect("Failed to bind test port");
     let port = listener.local_addr().unwrap().port();
-    drop(listener);
 
     tokio::spawn(async move {
-        op_sec_proxy::server::run_server(port, "https://mainnet.optimism.io".to_string())
+        op_sec_proxy::server::run_server_listener(listener, "https://mainnet.optimism.io".to_string())
             .await
             .ok();
     });
 
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     port
 }
