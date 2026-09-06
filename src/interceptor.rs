@@ -2,13 +2,18 @@ use serde_json::{json, Value};
 use std::time::Instant;
 use crate::decoder::decode_tx;
 use crate::fork_db::RpcDb;
-use crate::simulator::simulate_tx;
+use crate::simulator::{simulate_tx, SimulationConfidence};
 
 /// Intercepts eth_sendRawTransaction and eth_sendTransaction,
 /// simulates via revm, and returns a structured JSON-RPC -32000 error
-/// with revert_data, decoded_reason, estimated_gas_saved, and
+/// with revert_data, decoded_reason, estimated_gas_saved, confidence, and
 /// simulation_latency_ms when the transaction would revert on-chain.
+#[allow(dead_code)]
 pub fn check_payload(payload: &Value, upstream_url: &str) -> Result<(), Value> {
+    check_payload_opt(payload, upstream_url, true)
+}
+
+pub fn check_payload_opt(payload: &Value, upstream_url: &str, fail_open: bool) -> Result<(), Value> {
     let method = payload.get("method").and_then(|v| v.as_str()).unwrap_or("");
 
     if method == "eth_sendRawTransaction" || method == "eth_sendTransaction" {
@@ -28,7 +33,8 @@ pub fn check_payload(payload: &Value, upstream_url: &str) -> Result<(), Value> {
                         "message": format!("Execution reverted: decode error: {}", e),
                         "data": {
                             "decoded_reason": format!("decode error: {}", e),
-                            "simulation_latency_ms": elapsed_ms
+                            "simulation_latency_ms": elapsed_ms,
+                            "confidence": "uncertain"
                         }
                     }
                 }));
@@ -54,12 +60,25 @@ pub fn check_payload(payload: &Value, upstream_url: &str) -> Result<(), Value> {
                         "message": "Execution reverted: simulation flagged transaction",
                         "data": {
                             "decoded_reason": "simulation flagged transaction",
-                            "simulation_latency_ms": elapsed_ms
+                            "simulation_latency_ms": elapsed_ms,
+                            "confidence": "high"
                         }
                     }
                 }));
             }
             Err(blocked) => {
+                // Ambiguous simulation handling:
+                // If the simulation is uncertain (due to upstream state fetch timeout, RPC error, or stale state)
+                // and fail_open is true (default for user wallets), do not block the user. Allow pass-through
+                // to upstream sequencer.
+                if blocked.confidence == SimulationConfidence::Uncertain && fail_open {
+                    eprintln!(
+                        "[WARN] Ambiguous simulation ({}); failing open to sequencer with confidence=uncertain",
+                        blocked.message
+                    );
+                    return Ok(());
+                }
+
                 let elapsed_ms = sim_start.elapsed().as_millis() as u64;
                 let estimated_gas_saved = if blocked.gas_used > 0 {
                     blocked.gas_used
@@ -69,7 +88,8 @@ pub fn check_payload(payload: &Value, upstream_url: &str) -> Result<(), Value> {
 
                 let mut data_obj = json!({
                     "estimated_gas_saved": estimated_gas_saved,
-                    "simulation_latency_ms": elapsed_ms
+                    "simulation_latency_ms": elapsed_ms,
+                    "confidence": blocked.confidence
                 });
 
                 if let Some(ref rd) = blocked.revert_data_hex {

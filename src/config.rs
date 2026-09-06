@@ -54,6 +54,7 @@ pub struct Config {
     pub proxy_port: u16,
     #[allow(dead_code)]
     pub network: SuperchainNetwork,
+    pub fail_open: bool,
 }
 
 impl Config {
@@ -74,10 +75,15 @@ impl Config {
         let chain_id = chain_id_str.parse::<u64>().unwrap_or(10);
         let network = SuperchainNetwork::from_chain_id(chain_id);
 
+        let fail_open = env::var("OP_SEC_FAIL_OPEN")
+            .map(|v| v != "0" && v.to_lowercase() != "false")
+            .unwrap_or(true);
+
         Self {
             op_rpc_url,
             proxy_port,
             network,
+            fail_open,
         }
     }
 }

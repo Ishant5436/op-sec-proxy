@@ -5,6 +5,16 @@ use revm::primitives::TxKind;
 use revm::database::WrapDatabaseRef;
 use crate::fork_db::RpcDb;
 
+/// Classification of simulation certainty.
+/// - `High`: The transaction was successfully simulated against EVM state and produced a definite revert or halt.
+/// - `Uncertain`: Simulation could not be definitively completed (e.g. upstream RPC network timeout, state fetch error, or transient failure).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SimulationConfidence {
+    High,
+    Uncertain,
+}
+
 /// Structured revert payload emitted when a transaction is blocked.
 #[derive(Debug, Clone)]
 pub struct BlockedTx {
@@ -13,6 +23,7 @@ pub struct BlockedTx {
     pub decoded_reason: Option<String>,
     pub gas_used: u64,
     pub gas_limit: u64,
+    pub confidence: SimulationConfidence,
 }
 
 pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
@@ -23,6 +34,7 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
         decoded_reason: None,
         gas_used: 0,
         gas_limit: 0,
+        confidence: SimulationConfidence::Uncertain,
     })?;
     
     // 2. Setup the EVM context and database
@@ -56,16 +68,29 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
             decoded_reason: None,
             gas_used: 0,
             gas_limit,
+            confidence: SimulationConfidence::Uncertain,
         })?;
         
     // 5. Execute the simulation
     let sim_result = evm.transact(revm_tx)
-        .map_err(|e| BlockedTx {
-            message: format!("Simulation execution error: {:?}", e),
-            revert_data_hex: None,
-            decoded_reason: None,
-            gas_used: 0,
-            gas_limit,
+        .map_err(|e| {
+            let is_db_error = matches!(e, revm::context::result::EVMError::Database(_));
+            BlockedTx {
+                message: format!("Simulation execution error: {:?}", e),
+                revert_data_hex: None,
+                decoded_reason: if is_db_error {
+                    Some("Upstream state fetch error or timeout".to_string())
+                } else {
+                    None
+                },
+                gas_used: 0,
+                gas_limit,
+                confidence: if is_db_error {
+                    SimulationConfidence::Uncertain
+                } else {
+                    SimulationConfidence::High
+                },
+            }
         })?;
         
     // 6. Security Analysis
@@ -80,6 +105,7 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
                 decoded_reason: None,
                 gas_used,
                 gas_limit,
+                confidence: SimulationConfidence::High,
             });
         }
         Ok(true)
@@ -90,6 +116,7 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
             decoded_reason: None,
             gas_used,
             gas_limit,
+            confidence: SimulationConfidence::High,
         })
     } else {
         // Rule 3: Decoded Revert Detection (Milestone 1 Deliverable)
@@ -133,6 +160,7 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
                 decoded_reason: decoded,
                 gas_used,
                 gas_limit,
+                confidence: SimulationConfidence::High,
             });
         }
         Err(BlockedTx {
@@ -141,6 +169,7 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
             decoded_reason: None,
             gas_used,
             gas_limit,
+            confidence: SimulationConfidence::High,
         })
     }
 }

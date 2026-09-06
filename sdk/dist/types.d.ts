@@ -20,6 +20,7 @@ export interface JsonRpcErrorObject {
         decoded_reason?: string;
         estimated_gas_saved?: number;
         simulation_latency_ms?: number;
+        confidence?: "high" | "uncertain";
     } | string;
 }
 export interface JsonRpcErrorResponse {
@@ -35,6 +36,7 @@ export interface SimulationResult {
     revertReason?: string;
     revertData?: string;
     latencyMs?: number;
+    confidence?: "high" | "uncertain";
 }
 export interface OpSecConfig {
     proxyUrl: string;

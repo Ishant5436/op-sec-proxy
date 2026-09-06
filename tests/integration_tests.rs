@@ -217,6 +217,35 @@ fn interceptor_rejects_only_exact_method_name() {
     );
 }
 
+#[test]
+fn interceptor_reports_confidence_on_decode_error() {
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_sendRawTransaction",
+        "params": ["0xdeadbeef"],
+        "id": 101
+    });
+    let res = op_sec_proxy::interceptor::check_payload_opt(&payload, TEST_UPSTREAM, false);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert_eq!(err["error"]["code"], -32000);
+    assert_eq!(err["error"]["data"]["confidence"], "uncertain");
+}
+
+#[test]
+fn interceptor_distinguishes_confidence_modes() {
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_sendRawTransaction",
+        "params": ["0xdeadbeef"],
+        "id": 102
+    });
+    let res = op_sec_proxy::interceptor::check_payload(&payload, TEST_UPSTREAM);
+    assert!(res.is_err());
+    let err = res.unwrap_err();
+    assert!(err["error"]["data"]["confidence"].is_string());
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  INTEGRATION TESTS — Full server round-trip
 // ═══════════════════════════════════════════════════════════════════
@@ -380,7 +409,7 @@ async fn spawn_test_server() -> u16 {
 
     tokio::spawn(async move {
         // Use a non-routable address so forwarding errors out quickly
-        op_sec_proxy::server::run_server_listener(listener, "http://192.0.2.1:1".to_string())
+        op_sec_proxy::server::run_server_listener(listener, "http://192.0.2.1:1".to_string(), true)
             .await
             .ok();
     });
@@ -451,7 +480,7 @@ async fn spawn_test_server_with_upstream() -> u16 {
     let port = listener.local_addr().unwrap().port();
 
     tokio::spawn(async move {
-        op_sec_proxy::server::run_server_listener(listener, upstream_url)
+        op_sec_proxy::server::run_server_listener(listener, upstream_url, true)
             .await
             .ok();
     });

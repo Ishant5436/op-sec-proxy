@@ -10,12 +10,14 @@ export class RevertBlockedError extends Error {
   public readonly decodedReason?: string;
   public readonly estimatedGasSaved?: number;
   public readonly latencyMs?: number;
+  public readonly confidence: "high" | "uncertain";
 
   constructor(rpcError: JsonRpcErrorObject) {
     let reason = rpcError.message;
     let rawData: string | undefined;
     let gasSaved: number | undefined;
     let latency: number | undefined;
+    let confidence: "high" | "uncertain" = "high";
 
     if (typeof rpcError.data === "object" && rpcError.data !== null) {
       if (rpcError.data.decoded_reason) {
@@ -24,6 +26,9 @@ export class RevertBlockedError extends Error {
       rawData = rpcError.data.revert_data;
       gasSaved = rpcError.data.estimated_gas_saved;
       latency = rpcError.data.simulation_latency_ms;
+      if (rpcError.data.confidence) {
+        confidence = rpcError.data.confidence;
+      }
     } else if (typeof rpcError.data === "string") {
       rawData = rpcError.data;
       const decoded = decodeStandardRevert(rpcError.data);
@@ -37,6 +42,7 @@ export class RevertBlockedError extends Error {
     this.rawRevertData = rawData;
     this.estimatedGasSaved = gasSaved;
     this.latencyMs = latency;
+    this.confidence = confidence;
   }
 }
 

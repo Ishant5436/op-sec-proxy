@@ -15,21 +15,23 @@ const INTERNAL_ERROR_JSON: &str = r#"{"jsonrpc":"2.0","id":null,"error":{"code":
 struct AppState {
     forwarder: RpcForwarder,
     upstream_url: String,
+    fail_open: bool,
 }
 
-pub async fn run_server(port: u16, upstream_url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn run_server(port: u16, upstream_url: String, fail_open: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(addr).await?;
-    run_server_listener(listener, upstream_url).await
+    run_server_listener(listener, upstream_url, fail_open).await
 }
 
-pub async fn run_server_listener(listener: TcpListener, upstream_url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn run_server_listener(listener: TcpListener, upstream_url: String, fail_open: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = listener.local_addr()?;
     println!("AESI Proxy listening on http://{}", addr);
 
     let state = AppState {
         forwarder: RpcForwarder::new(upstream_url.clone()),
         upstream_url,
+        fail_open,
     };
 
     loop {
@@ -109,8 +111,9 @@ async fn handle_request(
         // to protect the async Tokio runtime from synchronous RPC I/O in fork_db.
         let upstream = state.upstream_url.clone();
         let payload_for_sim = payload.clone();
+        let fail_open = state.fail_open;
         let check_result = tokio::task::spawn_blocking(move || {
-            crate::interceptor::check_payload(&payload_for_sim, &upstream)
+            crate::interceptor::check_payload_opt(&payload_for_sim, &upstream, fail_open)
         }).await;
 
         match check_result {

@@ -50,7 +50,7 @@ When connected through **OP Security Proxy**, outbound `eth_sendRawTransaction` 
 
 ## 2. Standard JSON-RPC Error Payload
 
-When a transaction would revert on-chain, the proxy intercepts the RPC call and returns an explicit error payload:
+When a transaction would revert on-chain, the proxy intercepts the RPC call and returns an explicit error payload with certainty classification:
 
 ```json
 {
@@ -63,7 +63,8 @@ When a transaction would revert on-chain, the proxy intercepts the RPC call and 
       "revert_data": "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000016496e73756666696369656e7420616c6c6f77616e636500000000000000000000",
       "decoded_reason": "Insufficient allowance",
       "estimated_gas_saved": 210000,
-      "simulation_latency_ms": 12
+      "simulation_latency_ms": 12,
+      "confidence": "high"
     }
   }
 }
@@ -77,6 +78,10 @@ When a transaction would revert on-chain, the proxy intercepts the RPC call and 
 | `decoded_reason` | `string` | Human-readable revert string decoded from `Error(string)` or `Panic(uint256)`. |
 | `estimated_gas_saved` | `number` | Gas units the user would have burned on-chain. |
 | `simulation_latency_ms` | `number` | Wall-clock milliseconds the local simulation took. |
+| `confidence` | `"high" \| "uncertain"` | `"high"` when verified via revm execution state. `"uncertain"` when simulation could not be definitively completed due to transient RPC timeout or state fetch degradation. |
+
+### Fail-Open Default for Wallet Usability
+To guarantee wallet reliability, `OP Security Proxy` defaults to **fail-open** (`OP_SEC_FAIL_OPEN=true`). If an upstream RPC node experiences transient network latency, 429 rate limiting, or stale state during fork reconstruction, the proxy logs an `[WARN]` warning and forwards the raw transaction directly to the sequencer rather than blocking a valid user action.
 
 ---
 

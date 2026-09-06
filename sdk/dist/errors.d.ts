@@ -8,6 +8,7 @@ export declare class RevertBlockedError extends Error {
     readonly decodedReason?: string;
     readonly estimatedGasSaved?: number;
     readonly latencyMs?: number;
+    readonly confidence: "high" | "uncertain";
     constructor(rpcError: JsonRpcErrorObject);
 }
 /**

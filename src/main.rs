@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Starting OP Security Proxy...");
     println!("Upstream RPC: {}", mask_rpc_url(&cfg.op_rpc_url));
     
-    server::run_server(cfg.proxy_port, cfg.op_rpc_url).await?;
+    server::run_server(cfg.proxy_port, cfg.op_rpc_url, cfg.fail_open).await?;
     
     Ok(())
 }
