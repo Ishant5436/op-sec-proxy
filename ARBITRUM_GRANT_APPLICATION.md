@@ -38,7 +38,7 @@ The core engine is implemented and open-sourced under the MIT license:
   - Warm Keep-Alive Interception Overhead: **+11.80 ms**.
   - Cold Request Latency Reduction: **-97.09 ms** (achieved via Hyper connection pooling against upstream RPC endpoints).
   - Uncached Remote Simulation: ~2.7 seconds (Milestone 1 targets **< 65 ms** via local trie caching).
-* **Test Suite:** 41/41 automated tests passing across the Rust core, RPC interceptor, and LRU cache (`cargo test`).
+* **Test Suite:** 45 automated tests passing across the Rust core and TypeScript client SDK (`make test`).
 
 ---
 
@@ -95,10 +95,10 @@ The core engine is implemented and open-sourced under the MIT license:
 ## 6. Verification & Reproducibility
 
 ```bash
-# Clone and verify test suite (41/41 tests passing)
+# Clone and verify test suite (45/45 tests passing)
 git clone https://github.com/Ishant5436/op-sec-proxy.git
 cd op-sec-proxy
-cargo test
+make test
 
 # Run benchmarks against Arbitrum One
 cargo build --release
