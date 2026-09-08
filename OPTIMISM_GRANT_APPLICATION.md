@@ -4,7 +4,7 @@
 **Track:** Developer Tooling & Superchain Public Goods  
 **Requested Amount:** 10,000 OP (~$15,000 USD equivalent)  
 **Project Repository:** [https://github.com/Ishant5436/op-sec-proxy](https://github.com/Ishant5436/op-sec-proxy)  
-**Governance Discussion:** [Discourse Thread #10810](https://gov.optimism.io/t/op-security-proxy-a-local-rpc-middleware-to-prevent-paying-for-failed-l2-executions/10810)  
+**Governance Discussion:** [Discourse Thread #10845](https://gov.optimism.io/t/builder-grant-proposal-op-security-proxy-local-pre-execution-revert-interception-for-the-superchain/10845)  
 **Applicant:** Ishant Panchal (`Ishant5436` / `ishant.p@somaiya.edu`)  
 
 ---
@@ -80,7 +80,7 @@ On EVM networks, users pay transaction fees even when transactions revert on-cha
 
 * **User Protection:** Prevents failed transaction gas burns for Superchain users and programmatic agents.
 * **Sequencer Efficiency:** Decreases mempool congestion by filtering out reverting payloads before broadcast.
-* **Community Introduction:** Initial project introduction published on the [Optimism Governance Forum (#10810)](https://gov.optimism.io/t/op-security-proxy-a-local-rpc-middleware-to-prevent-paying-for-failed-l2-executions/10810).
+* **Community & Governance Feedback:** Full Builder Grant proposal discussion published on the [Optimism Governance Forum (#10845)](https://gov.optimism.io/t/builder-grant-proposal-op-security-proxy-local-pre-execution-revert-interception-for-the-superchain/10845) (with initial intro on [Thread #10810](https://gov.optimism.io/t/op-security-proxy-a-local-rpc-middleware-to-prevent-paying-for-failed-l2-executions/10810)).
 
 ---
 
