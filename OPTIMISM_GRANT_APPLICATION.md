@@ -27,7 +27,7 @@ On EVM networks, users pay transaction fees even when transactions revert on-cha
 ## 2. Current Implementation & Technical Evidence
 
 * **Core Engine:** Built in Rust using `tokio` (async runtime), `hyper` (HTTP server), `alloy` (Ethereum types), and `revm` (in-memory execution).
-* **Test Coverage:** 40 automated tests passing across the Rust core and TypeScript client SDK (`make test`).
+* **Test Coverage:** 45 automated tests passing across the Rust core and TypeScript client SDK (`make test`).
 * **Routing Overhead:** Measured at **+11.80 ms** processing overhead on warm keep-alive sessions, and **-97.09 ms** latency reduction on cold requests via Hyper connection pool reuse (see `BENCHMARK_RESULTS.md`).
 * **Simulation Baseline:** Uncached remote RPC simulation currently averages ~2.7s; Milestone 1 targets dropping this to **< 65 ms** via local state trie caching.
 * **Open Source:** Permissive MIT License.
@@ -87,7 +87,7 @@ On EVM networks, users pay transaction fees even when transactions revert on-cha
 ## 6. Verification & Reproducibility
 
 ```bash
-# 1. Clone & Run Test Suite (40/40 Tests Passing)
+# 1. Clone & Run Test Suite (45/45 Tests Passing)
 git clone https://github.com/Ishant5436/op-sec-proxy.git
 cd op-sec-proxy
 make test
