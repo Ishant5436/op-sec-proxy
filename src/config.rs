@@ -61,12 +61,11 @@ impl Config {
     pub fn from_env() -> Self {
         dotenv().ok(); // Load .env file if it exists, ignore if not
 
-        let op_rpc_url = env::var("OP_RPC_URL")
-            .unwrap_or_else(|_| "https://mainnet.optimism.io".to_string());
+        let op_rpc_url =
+            env::var("OP_RPC_URL").unwrap_or_else(|_| "https://mainnet.optimism.io".to_string());
 
-        let proxy_port_str = env::var("PROXY_PORT")
-            .unwrap_or_else(|_| "3000".to_string());
-        
+        let proxy_port_str = env::var("PROXY_PORT").unwrap_or_else(|_| "3000".to_string());
+
         let proxy_port = proxy_port_str
             .parse::<u16>()
             .expect("PROXY_PORT must be a valid u16 port number");
@@ -103,7 +102,7 @@ mod tests {
         let config = Config::from_env();
         assert_eq!(config.op_rpc_url, "http://localhost:8545");
         assert_eq!(config.proxy_port, 8080);
-        
+
         // Clean up
         unsafe {
             env::remove_var("OP_RPC_URL");
@@ -113,16 +112,40 @@ mod tests {
 
     #[test]
     fn test_superchain_network_resolution() {
-        assert_eq!(SuperchainNetwork::from_chain_id(10), SuperchainNetwork::OpMainnet);
-        assert_eq!(SuperchainNetwork::from_chain_id(8453), SuperchainNetwork::Base);
-        assert_eq!(SuperchainNetwork::from_chain_id(34443), SuperchainNetwork::Mode);
-        assert_eq!(SuperchainNetwork::from_chain_id(7777777), SuperchainNetwork::Zora);
-        assert_eq!(SuperchainNetwork::from_chain_id(252), SuperchainNetwork::Fraxtal);
-        assert_eq!(SuperchainNetwork::from_chain_id(999), SuperchainNetwork::Custom(999));
+        assert_eq!(
+            SuperchainNetwork::from_chain_id(10),
+            SuperchainNetwork::OpMainnet
+        );
+        assert_eq!(
+            SuperchainNetwork::from_chain_id(8453),
+            SuperchainNetwork::Base
+        );
+        assert_eq!(
+            SuperchainNetwork::from_chain_id(34443),
+            SuperchainNetwork::Mode
+        );
+        assert_eq!(
+            SuperchainNetwork::from_chain_id(7777777),
+            SuperchainNetwork::Zora
+        );
+        assert_eq!(
+            SuperchainNetwork::from_chain_id(252),
+            SuperchainNetwork::Fraxtal
+        );
+        assert_eq!(
+            SuperchainNetwork::from_chain_id(999),
+            SuperchainNetwork::Custom(999)
+        );
 
         assert_eq!(SuperchainNetwork::OpMainnet.chain_id(), 10);
         assert_eq!(SuperchainNetwork::Base.chain_id(), 8453);
-        assert_eq!(SuperchainNetwork::OpMainnet.default_rpc_url(), "https://mainnet.optimism.io");
-        assert_eq!(SuperchainNetwork::Base.default_rpc_url(), "https://mainnet.base.org");
+        assert_eq!(
+            SuperchainNetwork::OpMainnet.default_rpc_url(),
+            "https://mainnet.optimism.io"
+        );
+        assert_eq!(
+            SuperchainNetwork::Base.default_rpc_url(),
+            "https://mainnet.base.org"
+        );
     }
 }

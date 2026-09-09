@@ -1,6 +1,10 @@
-.PHONY: all test test-rust test-sdk build demo gui clean docker
+.PHONY: all test test-rust test-sdk build demo gui clean docker lint
 
 all: test
+
+lint:
+	cargo clippy --all-targets -- -D warnings
+	cargo fmt --check
 
 test: test-rust test-sdk
 

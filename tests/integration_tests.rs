@@ -1,5 +1,5 @@
-use serde_json::{json, Value};
 use op_sec_proxy::interceptor::check_payload;
+use serde_json::{Value, json};
 
 // Dummy upstream URL used for tests that don't need real network access.
 // The simulation will fail during decode (invalid tx hex) before any RPC call is made.
@@ -82,7 +82,10 @@ fn interceptor_blocks_empty_params() {
         "id": 1
     });
     let result = check_payload(&payload, TEST_UPSTREAM);
-    assert!(result.is_err(), "Empty params should be blocked at decode stage");
+    assert!(
+        result.is_err(),
+        "Empty params should be blocked at decode stage"
+    );
 }
 
 #[test]
@@ -147,7 +150,10 @@ fn interceptor_handles_missing_method_field() {
         "params": [],
         "id": 1
     });
-    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok(), "Missing method should pass through");
+    assert!(
+        check_payload(&payload, TEST_UPSTREAM).is_ok(),
+        "Missing method should pass through"
+    );
 }
 
 #[test]
@@ -158,7 +164,10 @@ fn interceptor_handles_non_string_method() {
         "params": [],
         "id": 1
     });
-    assert!(check_payload(&payload, TEST_UPSTREAM).is_ok(), "Non-string method should pass through");
+    assert!(
+        check_payload(&payload, TEST_UPSTREAM).is_ok(),
+        "Non-string method should pass through"
+    );
 }
 
 #[test]
@@ -295,7 +304,11 @@ async fn server_intercepts_send_raw_transaction() {
         .await
         .expect("POST request failed");
 
-    assert_eq!(resp.status(), 200, "Intercepted response should still be 200");
+    assert_eq!(
+        resp.status(),
+        200,
+        "Intercepted response should still be 200"
+    );
 
     let body: Value = resp.json().await.expect("Response should be valid JSON");
     assert_eq!(body["error"]["code"], -32000);
@@ -335,7 +348,10 @@ async fn server_forwards_safe_rpc_calls_upstream() {
 
     let body: Value = resp.json().await.expect("Response should be valid JSON");
     // OP Mainnet chain ID is 0xa (10)
-    assert_eq!(body["result"], "0xa", "OP Mainnet chain ID should be 0xa (10)");
+    assert_eq!(
+        body["result"], "0xa",
+        "OP Mainnet chain ID should be 0xa (10)"
+    );
 }
 
 #[tokio::test]
@@ -386,11 +402,21 @@ async fn server_rejects_payload_exceeding_body_size_limit() {
         .await
         .expect("POST request should receive response");
 
-    assert_eq!(resp.status(), 413, "Server must return 413 Payload Too Large");
-    let body: Value = resp.json().await.expect("Response should be valid JSON-RPC error");
+    assert_eq!(
+        resp.status(),
+        413,
+        "Server must return 413 Payload Too Large"
+    );
+    let body: Value = resp
+        .json()
+        .await
+        .expect("Response should be valid JSON-RPC error");
     assert_eq!(body["error"]["code"], -32600);
     assert!(
-        body["error"]["message"].as_str().unwrap().contains("Request body too large"),
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Request body too large"),
         "Error message should explain body size limit"
     );
 }
@@ -435,36 +461,46 @@ async fn spawn_test_server_with_upstream() -> u16 {
             let io = hyper_util::rt::TokioIo::new(stream);
             tokio::spawn(async move {
                 use http_body_util::BodyExt;
-                let service = hyper::service::service_fn(|req: hyper::Request<hyper::body::Incoming>| async move {
-                    let body_bytes = req.into_body().collect().await.map(|c| c.to_bytes()).unwrap_or_default();
-                    let val: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or_default();
-                    let method = val["method"].as_str().unwrap_or("");
-                    let id = val.get("id").cloned().unwrap_or(serde_json::Value::Null);
+                let service = hyper::service::service_fn(
+                    |req: hyper::Request<hyper::body::Incoming>| async move {
+                        let body_bytes = req
+                            .into_body()
+                            .collect()
+                            .await
+                            .map(|c| c.to_bytes())
+                            .unwrap_or_default();
+                        let val: serde_json::Value =
+                            serde_json::from_slice(&body_bytes).unwrap_or_default();
+                        let method = val["method"].as_str().unwrap_or("");
+                        let id = val.get("id").cloned().unwrap_or(serde_json::Value::Null);
 
-                    let resp_body = match method {
-                        "eth_chainId" => serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": "0xa"
-                        }),
-                        "eth_blockNumber" => serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": "0x123456"
-                        }),
-                        _ => serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": "0x0"
-                        }),
-                    };
+                        let resp_body = match method {
+                            "eth_chainId" => serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "result": "0xa"
+                            }),
+                            "eth_blockNumber" => serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "result": "0x123456"
+                            }),
+                            _ => serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "result": "0x0"
+                            }),
+                        };
 
-                    let resp = hyper::Response::builder()
-                        .header("content-type", "application/json")
-                        .body(http_body_util::Full::new(hyper::body::Bytes::from(resp_body.to_string())))
-                        .unwrap();
-                    Ok::<_, hyper::Error>(resp)
-                });
+                        let resp = hyper::Response::builder()
+                            .header("content-type", "application/json")
+                            .body(http_body_util::Full::new(hyper::body::Bytes::from(
+                                resp_body.to_string(),
+                            )))
+                            .unwrap();
+                        Ok::<_, hyper::Error>(resp)
+                    },
+                );
 
                 hyper::server::conn::http1::Builder::new()
                     .serve_connection(io, service)

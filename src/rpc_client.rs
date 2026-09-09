@@ -20,8 +20,12 @@ impl RpcForwarder {
         }
     }
 
-    pub async fn forward(&self, payload: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        let response = self.client
+    pub async fn forward(
+        &self,
+        payload: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self
+            .client
             .post(&self.upstream_url)
             .json(&payload)
             .send()

@@ -11,19 +11,21 @@ pub fn decode_tx(payload: &Value) -> Result<TxEnvelope, String> {
     }
 
     // 2. Extract params array
-    let params = payload.get("params")
+    let params = payload
+        .get("params")
         .and_then(|v| v.as_array())
         .ok_or_else(|| "Missing or invalid 'params' array".to_string())?;
 
     // 3. Extract the first param as hex string
-    let raw_tx_hex = params.first()
+    let raw_tx_hex = params
+        .first()
         .and_then(|v| v.as_str())
         .ok_or("First parameter must be a hex string".to_string())?;
 
     // 4. Decode hex string to bytes
     let hex_str = raw_tx_hex.trim_start_matches("0x");
     let bytes = hex::decode(hex_str).map_err(|e| e.to_string())?;
-    
+
     // 5. RLP Decode EIP-2718 TxEnvelope
     let tx = TxEnvelope::decode(&mut bytes.as_slice()).map_err(|e| e.to_string())?;
 
@@ -46,7 +48,7 @@ mod tests {
             "method": "eth_sendRawTransaction",
             "params": []
         });
-        
+
         let res = decode_tx(&payload);
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), "First parameter must be a hex string");
@@ -59,7 +61,7 @@ mod tests {
             "method": "eth_call",
             "params": ["0x1234"]
         });
-        
+
         let res = decode_tx(&payload);
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), "Not a transaction send method");

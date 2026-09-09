@@ -1,8 +1,8 @@
-use serde_json::{json, Value};
-use std::time::Instant;
 use crate::decoder::decode_tx;
 use crate::fork_db::RpcDb;
-use crate::simulator::{simulate_tx, SimulationConfidence};
+use crate::simulator::{SimulationConfidence, simulate_tx};
+use serde_json::{Value, json};
+use std::time::Instant;
 
 /// Intercepts eth_sendRawTransaction and eth_sendTransaction,
 /// simulates via revm, and returns a structured JSON-RPC -32000 error
@@ -13,7 +13,11 @@ pub fn check_payload(payload: &Value, upstream_url: &str) -> Result<(), Value> {
     check_payload_opt(payload, upstream_url, true)
 }
 
-pub fn check_payload_opt(payload: &Value, upstream_url: &str, fail_open: bool) -> Result<(), Value> {
+pub fn check_payload_opt(
+    payload: &Value,
+    upstream_url: &str,
+    fail_open: bool,
+) -> Result<(), Value> {
     let method = payload.get("method").and_then(|v| v.as_str()).unwrap_or("");
 
     if method == "eth_sendRawTransaction" || method == "eth_sendTransaction" {
