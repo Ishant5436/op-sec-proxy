@@ -42,6 +42,18 @@ pub struct RpcDb {
 
 impl RpcDb {
     pub fn new(rpc_url: String) -> Self {
+        Self::new_with_caches(
+            rpc_url,
+            Arc::new(Mutex::new(LruCache::new(MAX_ACCOUNT_CACHE_CAPACITY))),
+            Arc::new(Mutex::new(LruCache::new(MAX_STORAGE_CACHE_CAPACITY))),
+        )
+    }
+
+    pub fn new_with_caches(
+        rpc_url: String,
+        account_cache: Arc<Mutex<LruCache<Address, AccountInfo>>>,
+        storage_cache: Arc<Mutex<LruCache<(Address, U256), U256>>>,
+    ) -> Self {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -49,8 +61,8 @@ impl RpcDb {
                 .build()
                 .expect("Failed to build blocking HTTP client"),
             rpc_url,
-            account_cache: Arc::new(Mutex::new(LruCache::new(MAX_ACCOUNT_CACHE_CAPACITY))),
-            storage_cache: Arc::new(Mutex::new(LruCache::new(MAX_STORAGE_CACHE_CAPACITY))),
+            account_cache,
+            storage_cache,
         }
     }
 

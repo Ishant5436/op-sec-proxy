@@ -18,6 +18,15 @@ pub fn check_payload_opt(
     upstream_url: &str,
     fail_open: bool,
 ) -> Result<(), Value> {
+    let db = RpcDb::new(upstream_url.to_string());
+    check_payload_with_db(payload, db, fail_open)
+}
+
+pub fn check_payload_with_db(
+    payload: &Value,
+    db: RpcDb,
+    fail_open: bool,
+) -> Result<(), Value> {
     let method = payload.get("method").and_then(|v| v.as_str()).unwrap_or("");
 
     if method == "eth_sendRawTransaction" || method == "eth_sendTransaction" {
@@ -45,10 +54,7 @@ pub fn check_payload_opt(
             }
         };
 
-        // 2. Initialize Fork Database
-        let db = RpcDb::new(upstream_url.to_string());
-
-        // 3. Simulate Transaction
+        // 2. Simulate Transaction with persistent RpcDb
         match simulate_tx(&tx_env, db) {
             Ok(true) => {
                 // Simulation succeeded and passed heuristics

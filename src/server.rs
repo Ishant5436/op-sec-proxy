@@ -7,7 +7,12 @@ use serde_json::Value;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
+use crate::fork_db::{MAX_ACCOUNT_CACHE_CAPACITY, MAX_STORAGE_CACHE_CAPACITY, RpcDb};
+use crate::lru::LruCache;
 use crate::rpc_client::RpcForwarder;
+use revm::primitives::{Address, U256};
+use revm::state::AccountInfo;
+use std::sync::{Arc, Mutex};
 
 const INTERNAL_ERROR_JSON: &str =
     r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal server error"}}"#;
@@ -17,6 +22,8 @@ struct AppState {
     forwarder: RpcForwarder,
     upstream_url: String,
     fail_open: bool,
+    account_cache: Arc<Mutex<LruCache<Address, AccountInfo>>>,
+    storage_cache: Arc<Mutex<LruCache<(Address, U256), U256>>>,
 }
 
 pub async fn run_server(
@@ -41,6 +48,8 @@ pub async fn run_server_listener(
         forwarder: RpcForwarder::new(upstream_url.clone()),
         upstream_url,
         fail_open,
+        account_cache: Arc::new(Mutex::new(LruCache::new(MAX_ACCOUNT_CACHE_CAPACITY))),
+        storage_cache: Arc::new(Mutex::new(LruCache::new(MAX_STORAGE_CACHE_CAPACITY))),
     };
 
     loop {
@@ -142,8 +151,11 @@ async fn handle_request(
         let upstream = state.upstream_url.clone();
         let payload_for_sim = payload.clone();
         let fail_open = state.fail_open;
+        let account_cache = state.account_cache.clone();
+        let storage_cache = state.storage_cache.clone();
         let check_result = tokio::task::spawn_blocking(move || {
-            crate::interceptor::check_payload_opt(&payload_for_sim, &upstream, fail_open)
+            let db = RpcDb::new_with_caches(upstream, account_cache, storage_cache);
+            crate::interceptor::check_payload_with_db(&payload_for_sim, db, fail_open)
         })
         .await;
 
