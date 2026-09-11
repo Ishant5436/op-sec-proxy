@@ -98,32 +98,45 @@ impl RpcDb {
             "id": 1
         });
 
-        let send_fut = self.client.post(&self.rpc_url).json(&payload).send();
+        let client = &self.client;
+        let rpc_url = &self.rpc_url;
 
-        let resp = match &self.handle {
-            Some(h) => h.block_on(send_fut),
-            None => {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| RpcDbError(format!("Failed to spawn local runtime: {}", e)))?;
-                rt.block_on(send_fut)
-            }
-        }
-        .map_err(|e| RpcDbError(format!("RPC '{}' request failed: {}", method, e)))?;
-
-        let json_fut = resp.json();
         let json_resp: Value = match &self.handle {
-            Some(h) => h.block_on(json_fut),
+            Some(h) => tokio::task::block_in_place(|| {
+                h.block_on(async {
+                    let resp = client
+                        .post(rpc_url)
+                        .json(&payload)
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            RpcDbError(format!("RPC '{}' request failed: {}", method, e))
+                        })?;
+                    resp.json::<Value>().await.map_err(|e| {
+                        RpcDbError(format!("RPC '{}' response parse failed: {}", method, e))
+                    })
+                })
+            })?,
             None => {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .map_err(|e| RpcDbError(format!("Failed to spawn local runtime: {}", e)))?;
-                rt.block_on(json_fut)
+                rt.block_on(async {
+                    let resp = client
+                        .post(rpc_url)
+                        .json(&payload)
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            RpcDbError(format!("RPC '{}' request failed: {}", method, e))
+                        })?;
+                    resp.json::<Value>().await.map_err(|e| {
+                        RpcDbError(format!("RPC '{}' response parse failed: {}", method, e))
+                    })
+                })?
             }
-        }
-        .map_err(|e| RpcDbError(format!("RPC '{}' response parse failed: {}", method, e)))?;
+        };
 
         if let Some(err) = json_resp.get("error") {
             return Err(RpcDbError(format!(
