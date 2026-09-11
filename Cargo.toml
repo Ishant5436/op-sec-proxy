@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-alloy = { version = "2.3.0", features = ["rlp", "consensus", "rpc-types", "network", "providers", "k256"] }
+alloy = { version = "2.3.0", features = ["rlp", "consensus", "rpc-types", "network", "providers", "k256", "sol-types"] }
+alloy-sol-types = "1.6.1"
 dotenvy = "0.15.7"
 http-body-util = "0.1.4"
 hyper = { version = "1.11.0", features = ["full"] }

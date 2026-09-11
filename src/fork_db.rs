@@ -1,4 +1,4 @@
-use reqwest::blocking::Client;
+use reqwest::Client;
 use revm::{
     DatabaseRef,
     bytecode::Bytecode,
@@ -36,31 +36,55 @@ pub const MAX_STORAGE_CACHE_CAPACITY: usize = 16384;
 pub struct RpcDb {
     client: Client,
     rpc_url: String,
+    handle: Option<tokio::runtime::Handle>,
     account_cache: Arc<Mutex<LruCache<Address, AccountInfo>>>,
     storage_cache: Arc<Mutex<LruCache<(Address, U256), U256>>>,
 }
 
 impl RpcDb {
     pub fn new(rpc_url: String) -> Self {
-        Self::new_with_caches(
+        let client = Client::builder()
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(20)
+            .timeout(Duration::from_secs(15))
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .expect("Failed to build HTTP client");
+        Self::new_with_client_and_caches(
+            client,
             rpc_url,
             Arc::new(Mutex::new(LruCache::new(MAX_ACCOUNT_CACHE_CAPACITY))),
             Arc::new(Mutex::new(LruCache::new(MAX_STORAGE_CACHE_CAPACITY))),
         )
     }
 
+    #[allow(dead_code)]
     pub fn new_with_caches(
         rpc_url: String,
         account_cache: Arc<Mutex<LruCache<Address, AccountInfo>>>,
         storage_cache: Arc<Mutex<LruCache<(Address, U256), U256>>>,
     ) -> Self {
+        let client = Client::builder()
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(20)
+            .timeout(Duration::from_secs(15))
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .expect("Failed to build HTTP client");
+        Self::new_with_client_and_caches(client, rpc_url, account_cache, storage_cache)
+    }
+
+    pub fn new_with_client_and_caches(
+        client: Client,
+        rpc_url: String,
+        account_cache: Arc<Mutex<LruCache<Address, AccountInfo>>>,
+        storage_cache: Arc<Mutex<LruCache<(Address, U256), U256>>>,
+    ) -> Self {
+        let handle = tokio::runtime::Handle::try_current().ok();
         Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(30))
-                .connect_timeout(Duration::from_secs(10))
-                .build()
-                .expect("Failed to build blocking HTTP client"),
+            client,
             rpc_url,
+            handle,
             account_cache,
             storage_cache,
         }
@@ -74,16 +98,32 @@ impl RpcDb {
             "id": 1
         });
 
-        let resp = self
-            .client
-            .post(&self.rpc_url)
-            .json(&payload)
-            .send()
-            .map_err(|e| RpcDbError(format!("RPC '{}' request failed: {}", method, e)))?;
+        let send_fut = self.client.post(&self.rpc_url).json(&payload).send();
 
-        let json_resp: Value = resp
-            .json()
-            .map_err(|e| RpcDbError(format!("RPC '{}' response parse failed: {}", method, e)))?;
+        let resp = match &self.handle {
+            Some(h) => h.block_on(send_fut),
+            None => {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| RpcDbError(format!("Failed to spawn local runtime: {}", e)))?;
+                rt.block_on(send_fut)
+            }
+        }
+        .map_err(|e| RpcDbError(format!("RPC '{}' request failed: {}", method, e)))?;
+
+        let json_fut = resp.json();
+        let json_resp: Value = match &self.handle {
+            Some(h) => h.block_on(json_fut),
+            None => {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| RpcDbError(format!("Failed to spawn local runtime: {}", e)))?;
+                rt.block_on(json_fut)
+            }
+        }
+        .map_err(|e| RpcDbError(format!("RPC '{}' response parse failed: {}", method, e)))?;
 
         if let Some(err) = json_resp.get("error") {
             return Err(RpcDbError(format!(
@@ -189,5 +229,29 @@ impl DatabaseRef for RpcDb {
     fn block_hash_ref(&self, _number: u64) -> Result<B256, Self::Error> {
         // Block hash logic is omitted for MVP simplicity
         Ok(B256::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_rpc_db_client_sharing() {
+        let client = Client::builder().build().unwrap();
+        let db1 = RpcDb::new_with_client_and_caches(
+            client.clone(),
+            "http://127.0.0.1:8545".to_string(),
+            Arc::new(Mutex::new(LruCache::new(10))),
+            Arc::new(Mutex::new(LruCache::new(10))),
+        );
+        let db2 = RpcDb::new_with_client_and_caches(
+            client,
+            "http://127.0.0.1:8545".to_string(),
+            Arc::new(Mutex::new(LruCache::new(10))),
+            Arc::new(Mutex::new(LruCache::new(10))),
+        );
+        assert_eq!(db1.rpc_url, db2.rpc_url);
+        assert!(db1.handle.is_some());
     }
 }

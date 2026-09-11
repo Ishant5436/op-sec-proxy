@@ -2857,6 +2857,7 @@ name = "op-sec-proxy"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "alloy-sol-types",
  "dotenvy",
  "http-body-util",
  "hyper",

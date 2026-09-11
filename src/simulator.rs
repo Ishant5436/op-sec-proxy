@@ -121,37 +121,12 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
             confidence: SimulationConfidence::High,
         })
     } else {
-        // Rule 3: Decoded Revert Detection (Milestone 1 Deliverable)
+        // Rule 3: Decoded Revert Detection (Milestone 1 Deliverable via alloy-sol-types)
         if let Some(output) = sim_result.result.output() {
             let hex_output = format!("0x{}", alloy::hex::encode(output));
-            let mut decoded: Option<String> = None;
+            let decode_res = crate::revert_decoder::decode_revert_output(output);
 
-            if output.len() >= 68 && output[0..4] == [0x08, 0xc3, 0x79, 0xa0] {
-                if let Ok(reason) = std::str::from_utf8(&output[68..]) {
-                    let clean = reason.trim_matches(char::from(0)).trim();
-                    if !clean.is_empty() {
-                        decoded = Some(clean.to_string());
-                    }
-                }
-            } else if output.len() >= 36 && output[0..4] == [0x4e, 0x48, 0x7b, 0x71] {
-                // Solidity Panic(uint256) selector 0x4e487b71 + 32-byte big-endian code
-                let code_byte = output[35];
-                let reason = match code_byte {
-                    0x01 => "Panic: Assert failed",
-                    0x11 => "Panic: Arithmetic overflow / underflow",
-                    0x12 => "Panic: Division by zero",
-                    0x21 => "Panic: Invalid enum value conversion",
-                    0x22 => "Panic: Storage byte array encoding error",
-                    0x31 => "Panic: Empty array pop",
-                    0x32 => "Panic: Array index out of bounds",
-                    0x41 => "Panic: Allocation of too much memory",
-                    0x51 => "Panic: Zero initialized internal function pointer",
-                    _ => "Panic: Unrecognized panic code",
-                };
-                decoded = Some(format!("{} (0x{:02x})", reason, code_byte));
-            }
-
-            let msg = match &decoded {
+            let msg = match &decode_res.decoded_reason {
                 Some(r) => format!("Execution reverted: {}", r),
                 None => format!("Transaction reverted during simulation ({})", hex_output),
             };
@@ -159,7 +134,7 @@ pub fn simulate_tx(tx_env: &TxEnvelope, db: RpcDb) -> Result<bool, BlockedTx> {
             return Err(BlockedTx {
                 message: msg,
                 revert_data_hex: Some(hex_output),
-                decoded_reason: decoded,
+                decoded_reason: decode_res.decoded_reason,
                 gas_used,
                 gas_limit,
                 confidence: SimulationConfidence::High,

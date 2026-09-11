@@ -18,15 +18,15 @@ pub fn check_payload_opt(
     upstream_url: &str,
     fail_open: bool,
 ) -> Result<(), Value> {
+    let method = payload.get("method").and_then(|v| v.as_str()).unwrap_or("");
+    if method != "eth_sendRawTransaction" && method != "eth_sendTransaction" {
+        return Ok(());
+    }
     let db = RpcDb::new(upstream_url.to_string());
     check_payload_with_db(payload, db, fail_open)
 }
 
-pub fn check_payload_with_db(
-    payload: &Value,
-    db: RpcDb,
-    fail_open: bool,
-) -> Result<(), Value> {
+pub fn check_payload_with_db(payload: &Value, db: RpcDb, fail_open: bool) -> Result<(), Value> {
     let method = payload.get("method").and_then(|v| v.as_str()).unwrap_or("");
 
     if method == "eth_sendRawTransaction" || method == "eth_sendTransaction" {

@@ -3,6 +3,7 @@ mod decoder;
 mod fork_db;
 mod interceptor;
 mod lru;
+mod revert_decoder;
 mod rpc_client;
 mod server;
 mod simulator;

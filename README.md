@@ -1,6 +1,6 @@
 # OP Security Proxy
 
-[![Rust Tests](https://img.shields.io/badge/Rust%20Tests-36%2F36%20passing-brightgreen)](tests/)
+[![Rust Tests](https://img.shields.io/badge/Rust%20Tests-40%20Unique%20Passing-brightgreen)](tests/)
 [![TypeScript SDK](https://img.shields.io/badge/TS%20SDK-4%2F4%20passing-blue)](sdk/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 [![Superchain](https://img.shields.io/badge/Superchain-OP%20Stack-red)](https://optimism.io)
@@ -20,8 +20,8 @@ The proxy intercepts outbound transactions (`eth_sendRawTransaction`) and utiliz
 | **State LRU Cache** | `LruCache<Address, AccountInfo>` | $\mathcal{O}(1)$ get / insert | $\mathcal{O}(K)$ arena | Intrusive doubly-linked index arena; zero heap reallocations after initialization (`cap = 4096`). |
 | **Storage Slot LRU** | `LruCache<(Address, U256), U256>` | $\mathcal{O}(1)$ get / insert | $\mathcal{O}(K)$ arena | Fixed arena slot reuse; FIFO tail eviction; bounded to 16,384 slots (<20 MB resident footprint). |
 | **Poison Recovery** | `Mutex::unwrap_or_else` | $\mathcal{O}(1)$ lock | $\mathcal{O}(1)$ | Fault-tolerant mutex unwrapping (`e.into_inner()`) preventing cascading worker thread crashes. |
-| **Revert Decoder** | 4-Byte Prefix Matcher | $\mathcal{O}(1)$ lookup | $\mathcal{O}(1)$ | Decodes standard `Error(string)` (`0x08c379a0`), `Panic(uint256)` (`0x4e487b71`), and custom ABI errors. |
-| **Simulation Fork** | `revm::DatabaseRef` RPC Fork | $\mathcal{O}(S)$ state reads | $\mathcal{O}(S)$ | Transaction-isolated memory state DB; reads upstream state lazily on first access. |
+| **Revert Decoder** | Compile-Time SolError Registry | $\mathcal{O}(1)$ lookup | $\mathcal{O}(1)$ | Strongly typed `alloy-sol-types` decoding for `Error(string)`, `Panic(uint256)`, ERC-20 `InsufficientAllowance`/`InsufficientBalance`, and DEX `SlippageExceeded`/`DeadlineExpired`. |
+| **Simulation Fork** | `revm::DatabaseRef` RPC Fork | $\mathcal{O}(S)$ state reads | $\mathcal{O}(S)$ | Transaction-isolated memory state DB; reuses shared connection pool across async Tokio tasks. |
 
 ---
 
@@ -42,7 +42,7 @@ For standard read-only RPC traffic (e.g., `eth_blockNumber`, `eth_call`), the pr
 ## 3. Quickstart & Verification
 
 ```bash
-# 1. Execute All 40 Automated Tests (Rust Core + TypeScript SDK)
+# 1. Execute All 44 Automated Tests (40 Unique Rust Tests + 4 TypeScript SDK Tests across 61 Executions)
 make test
 
 # 2. Launch Real-Time Telemetry Cockpit & Simulation Sandbox

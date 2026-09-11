@@ -14,6 +14,8 @@ use revm::primitives::{Address, U256};
 use revm::state::AccountInfo;
 use std::sync::{Arc, Mutex};
 
+use hyper::header::HeaderValue;
+
 const INTERNAL_ERROR_JSON: &str =
     r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal server error"}}"#;
 
@@ -22,6 +24,7 @@ struct AppState {
     forwarder: RpcForwarder,
     upstream_url: String,
     fail_open: bool,
+    http_client: reqwest::Client,
     account_cache: Arc<Mutex<LruCache<Address, AccountInfo>>>,
     storage_cache: Arc<Mutex<LruCache<(Address, U256), U256>>>,
 }
@@ -44,10 +47,19 @@ pub async fn run_server_listener(
     let addr = listener.local_addr()?;
     println!("AESI Proxy listening on http://{}", addr);
 
+    let http_client = reqwest::Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .pool_max_idle_per_host(20)
+        .timeout(std::time::Duration::from_secs(15))
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("Failed to build HTTP client at server startup");
+
     let state = AppState {
         forwarder: RpcForwarder::new(upstream_url.clone()),
         upstream_url,
         fail_open,
+        http_client,
         account_cache: Arc::new(Mutex::new(LruCache::new(MAX_ACCOUNT_CACHE_CAPACITY))),
         storage_cache: Arc::new(Mutex::new(LruCache::new(MAX_STORAGE_CACHE_CAPACITY))),
     };
@@ -76,17 +88,21 @@ pub const MAX_REQUEST_BODY_SIZE: usize = 2 * 1024 * 1024; // 2 MB
 fn build_json_response(body_str: String, status: StatusCode) -> Response<Full<Bytes>> {
     let mut resp = Response::new(Full::new(Bytes::from(body_str)));
     *resp.status_mut() = status;
-    resp.headers_mut()
-        .insert("Content-Type", "application/json".parse().unwrap());
-    resp.headers_mut()
-        .insert("Access-Control-Allow-Origin", "*".parse().unwrap());
     resp.headers_mut().insert(
-        "Access-Control-Allow-Methods",
-        "POST, OPTIONS".parse().unwrap(),
+        hyper::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
     );
     resp.headers_mut().insert(
-        "Access-Control-Allow-Headers",
-        "Content-Type".parse().unwrap(),
+        hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    resp.headers_mut().insert(
+        hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("POST, OPTIONS"),
+    );
+    resp.headers_mut().insert(
+        hyper::header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("Content-Type"),
     );
     resp
 }
@@ -98,16 +114,17 @@ async fn handle_request(
     if req.method() == hyper::Method::OPTIONS {
         let mut preflight = Response::new(Full::new(Bytes::default()));
         *preflight.status_mut() = StatusCode::NO_CONTENT;
-        preflight
-            .headers_mut()
-            .insert("Access-Control-Allow-Origin", "*".parse().unwrap());
         preflight.headers_mut().insert(
-            "Access-Control-Allow-Methods",
-            "POST, OPTIONS".parse().unwrap(),
+            hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
         );
         preflight.headers_mut().insert(
-            "Access-Control-Allow-Headers",
-            "Content-Type".parse().unwrap(),
+            hyper::header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("POST, OPTIONS"),
+        );
+        preflight.headers_mut().insert(
+            hyper::header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static("Content-Type"),
         );
         return Ok(preflight);
     }
@@ -151,10 +168,16 @@ async fn handle_request(
         let upstream = state.upstream_url.clone();
         let payload_for_sim = payload.clone();
         let fail_open = state.fail_open;
+        let http_client = state.http_client.clone();
         let account_cache = state.account_cache.clone();
         let storage_cache = state.storage_cache.clone();
         let check_result = tokio::task::spawn_blocking(move || {
-            let db = RpcDb::new_with_caches(upstream, account_cache, storage_cache);
+            let db = RpcDb::new_with_client_and_caches(
+                http_client,
+                upstream,
+                account_cache,
+                storage_cache,
+            );
             crate::interceptor::check_payload_with_db(&payload_for_sim, db, fail_open)
         })
         .await;
