@@ -23,6 +23,10 @@ demo:
 	node --test sdk/tests/provider.test.js
 	@echo "=== OP Security Proxy: 100% Verified Across Rust Core & TS SDK ==="
 
+audit-iso9001:
+	@echo "=== Verifying OP Security Proxy Against ISO/DIS 9001:2026 Standards ==="
+	python3 scripts/audit_iso9001_compliance.py
+
 gui:
 	@echo "Launching OP Security Proxy Telemetry Cockpit..."
 	@open web/index.html 2>/dev/null || xdg-open web/index.html 2>/dev/null || echo "Open web/index.html in your browser"
@@ -32,4 +36,6 @@ docker:
 
 clean:
 	cargo clean
-	rm -rf sdk/dist
+	rm -rf sdk/dist target/iso9001_audit_report.json
+
+.PHONY: all test test-rust test-sdk build demo gui clean docker lint audit-iso9001
