@@ -33,7 +33,7 @@ The proxy intercepts outbound `eth_sendRawTransaction` payloads and simulates ex
 The core engine is implemented and open-sourced under the MIT license:
 
 * **Engine:** Pure asynchronous Rust with `tokio`, `hyper`, `alloy`, and `revm`.
-* **Zero Allocation on Hot Paths:** Pre-allocated state caches and zero-copy JSON parsing adhering to Holzmann's Power of 10 Safety Invariants.
+* **Zero Allocation on Hot Paths:** Pre-allocated state caches and zero-copy JSON parsing adhering to Deterministic Safety Standards.
 * **Empirical Benchmarks:**
   - Warm Keep-Alive Interception Overhead: **+11.80 ms**.
   - Cold Request Latency Reduction: **-97.09 ms** (achieved via Hyper connection pooling against upstream RPC endpoints).
@@ -67,7 +67,7 @@ The core engine is implemented and open-sourced under the MIT license:
 * **Funding:** $5,000 USD (in ARB/USDC).
 
 ### Milestone 3: Client Integration SDK & Production Packaging
-* **Deliverable:** Lightweight TypeScript/JavaScript client package (`@arb-sec/client`) providing seamless drop-in middleware support for ethers.js, viem, and web3.js.
+* **Deliverable:** Lightweight TypeScript/JavaScript client package (`@arb-sec/client`) providing direct drop-in middleware support for ethers.js, viem, and web3.js.
 * **Deliverable:** Multi-architecture Docker images (`linux/amd64`, `linux/arm64`) with automated health checks, Prometheus metrics endpoints (`simulations_total`, `reverts_blocked_total`, `gas_saved_wei_total`), and Helm charts for Kubernetes deployments.
 * **Funding:** $5,000 USD (in ARB/USDC).
 

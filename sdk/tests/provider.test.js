@@ -122,7 +122,7 @@ describe('OP Security Proxy SDK Test Suite', () => {
     assert.equal(json.error.data.estimated_gas_saved, 210000);
   });
 
-  test('Proxy passes through non-mutating eth_blockNumber call seamlessly', async () => {
+  test('Proxy passes through non-mutating eth_blockNumber call directly', async () => {
     const res = await fetch(serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
